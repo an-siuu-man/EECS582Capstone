@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "Headstart AI",
+  "version": "0.1.0",
+  "description": "AI-powered assignment assistance for Canvas LMS students.",
+  "permissions": ["storage", "activeTab", "alarms"],
+  "host_permissions": [
+    "https://*.instructure.com/*",
+    "https://canvas.ku.edu/*"
+  ],
+  "background": {
+    "service_worker": "dist/background/service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.instructure.com/courses/*/assignments/*",
+        "https://*.instructure.com/courses/*/assignments",
+        "https://canvas.ku.edu/courses/*/assignments/*",
+        "https://canvas.ku.edu/courses/*/assignments"
+      ],
+      "js": ["dist/content/index.js"],
+      "css": ["src/content/styles/headstart-widget.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "src/popup/popup.html",
+    "default_icon": {
+      "16": "assets/icons/icon-16.png",
+      "48": "assets/icons/icon-64.png",
+      "128": "assets/icons/icon-128.png"
+    }
+  },
+  "icons": {
+    "16": "assets/icons/icon-16.png",
+    "48": "assets/icons/icon-64.png",
+    "128": "assets/icons/icon-128.png"
+  }
+}

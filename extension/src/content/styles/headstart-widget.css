@@ -1,0 +1,96 @@
+/*
+ * Headstart AI – Injected Widget Styles
+ *
+ * Scoped to .headstart-widget to avoid leaking into Canvas styles.
+ * Uses CSS custom properties for theming.
+ */
+
+:root {
+  --hs-primary: #4caf50;
+  --hs-primary-hover: #388e3c;
+  --hs-bg: #ffffff;
+  --hs-border: #e0e0e0;
+  --hs-text: #333333;
+  --hs-text-secondary: #666666;
+  --hs-radius: 8px;
+  --hs-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.headstart-widget {
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
+  background: var(--hs-bg);
+  border: 1px solid var(--hs-border);
+  border-radius: var(--hs-radius);
+  box-shadow: var(--hs-shadow);
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+
+.headstart-widget__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, var(--hs-primary) 0%, #66bb6a 100%);
+  color: #ffffff;
+}
+
+.headstart-widget__logo {
+  font-size: 20px;
+}
+
+.headstart-widget__title {
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0.3px;
+}
+
+.headstart-widget__body {
+  padding: 12px 16px;
+}
+
+.headstart-status {
+  font-size: 13px;
+  color: var(--hs-text);
+  margin: 0 0 8px 0;
+  line-height: 1.4;
+}
+
+.headstart-widget__details {
+  margin-bottom: 12px;
+}
+
+.headstart-detail {
+  font-size: 12px;
+  color: var(--hs-text-secondary);
+  margin: 4px 0;
+}
+
+.headstart-detail strong {
+  color: var(--hs-text);
+}
+
+.headstart-widget__btn {
+  display: block;
+  width: 100%;
+  padding: 8px 16px;
+  background: var(--hs-primary);
+  color: #ffffff;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.headstart-widget__btn:hover {
+  background: var(--hs-primary-hover);
+}
+
+.headstart-widget__btn:focus-visible {
+  outline: 2px solid var(--hs-primary);
+  outline-offset: 2px;
+}
