@@ -16,6 +16,7 @@ import { extractRubric } from "./rubric-extractor.js";
 /**
  * @typedef {Object} AssignmentData
  * @property {string} title
+ * @property {string} courseName          – extracted course name (e.g. "EECS 582")
  * @property {string} descriptionHtml   – raw HTML of the description
  * @property {string} descriptionText   – plain-text version
  * @property {string|null} dueDate      – ISO-ish date string or raw text
@@ -34,6 +35,7 @@ import { extractRubric } from "./rubric-extractor.js";
  */
 export function extractAssignmentData(doc, pageInfo) {
   const title = extractTitle(doc);
+  const courseName = extractCourseName(doc);
   const { html: descriptionHtml, text: descriptionText } =
     extractDescription(doc);
   const dueDate = extractDueDate(doc);
@@ -43,6 +45,7 @@ export function extractAssignmentData(doc, pageInfo) {
 
   return {
     title,
+    courseName,
     descriptionHtml,
     descriptionText,
     dueDate,
@@ -68,6 +71,14 @@ export function extractAssignmentData(doc, pageInfo) {
  */
 function extractTitle(doc) {
   const el = queryFirst(doc, CANVAS_SELECTORS.ASSIGNMENT_TITLE);
+  return el ? el.textContent.trim() : "";
+}
+
+/**
+ * Extract the course name from breadcrumbs or header.
+ */
+function extractCourseName(doc) {
+  const el = queryFirst(doc, CANVAS_SELECTORS.COURSE_NAME);
   return el ? el.textContent.trim() : "";
 }
 

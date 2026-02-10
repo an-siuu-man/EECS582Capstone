@@ -9,7 +9,7 @@
  *  4. Inject the Headstart widget into the page.
  */
 
-import { CANVAS_URL_PATTERNS, MESSAGE_TYPES } from "../shared/constants.js";
+import { CANVAS_URL_PATTERNS, MESSAGE_TYPES, CANVAS_SELECTORS } from "../shared/constants.js";
 import { detectCanvasPage } from "./detectors/page-detector.js";
 import { extractAssignmentData } from "./extractors/assignment-extractor.js";
 import { injectWidget } from "./ui/widget-injector.js";
@@ -29,6 +29,10 @@ import { injectWidget } from "./ui/widget-injector.js";
 
   console.log("[Headstart] Detected page:", pageInfo);
 
+  // Extract course name once for either page type
+  const courseNameEl = document.querySelector(CANVAS_SELECTORS.COURSE_NAME);
+  const courseName = courseNameEl ? courseNameEl.textContent.trim() : null;
+
   // ── Step 2: Handle based on page type ──────────────────────
   if (pageInfo.type === "single_assignment" && pageInfo.assignmentId) {
     // Notify service worker about this single assignment
@@ -37,6 +41,7 @@ import { injectWidget } from "./ui/widget-injector.js";
       payload: {
         courseId: pageInfo.courseId,
         assignmentId: pageInfo.assignmentId,
+        courseName: courseName,
         url: window.location.href,
       },
     });
@@ -61,9 +66,19 @@ import { injectWidget } from "./ui/widget-injector.js";
     // ── Step 3: Inject the widget ──────────────────────────────
     injectWidget(assignmentData);
   } else if (pageInfo.type === "assignment_list") {
-    // ── Assignment list page: detect each assignment with its name ──
+    // ── Assignment list page: detect each assignment with its name and due date ──
     await waitForSelector(".assignment, .ig-row, #assignment_group", 5000);
-    scrapeAssignmentList(pageInfo.courseId);
+    const assignments = scrapeAssignmentList(pageInfo.courseId, courseName);
+
+    // Show automatic Sidebar on the list page
+    if (assignments.length > 0) {
+      injectWidget({
+        title: "Course Overview",
+        courseName: courseName,
+        meta: { courseId: pageInfo.courseId },
+        listAssignments: assignments
+      });
+    }
   }
 })();
 
@@ -72,40 +87,53 @@ import { injectWidget } from "./ui/widget-injector.js";
 // ──────────────────────────────────────────────
 
 /**
- * Scrape the assignment list page to detect each assignment with its name.
- * Canvas list pages show assignments as links: /courses/:id/assignments/:id
+ * Scrape the assignment list page to detect each assignment with its name and due date.
  */
-function scrapeAssignmentList(courseId) {
-  // Canvas renders assignment links in various ways – target all <a> tags
-  // whose href matches the assignment URL pattern
-  const links = document.querySelectorAll('a[href*="/assignments/"]');
+function scrapeAssignmentList(courseId, courseName) {
+  const assignments = [];
+  const rows = document.querySelectorAll(CANVAS_SELECTORS.LIST_ASSIGNMENT_ROW);
   const seen = new Set();
 
-  links.forEach((link) => {
-    const match = link.href.match(/\/courses\/(\d+)\/assignments\/(\d+)/);
+  rows.forEach((row) => {
+    const link = row.querySelector(CANVAS_SELECTORS.LIST_ASSIGNMENT_TITLE);
+    if (!link) return;
+
+    const href = link.getAttribute("href");
+    if (!href) return;
+
+    const match = href.match(/\/courses\/(\d+)\/assignments\/(\d+)/);
     if (!match) return;
 
     const assignmentId = match[2];
     if (seen.has(assignmentId)) return;
     seen.add(assignmentId);
 
-    // Get the assignment name from the link text
     const title = link.textContent.trim();
+    const dueDateEl = row.querySelector(CANVAS_SELECTORS.LIST_ASSIGNMENT_DUE_DATE);
+    const dueDate = dueDateEl ? dueDateEl.textContent.trim().replace(/\s+/g, " ") : null;
 
     console.log(
-      `[Headstart] List page – found: "${title}" (ID ${assignmentId})`,
+      `[Headstart] List page – found: "${title}" (Due: ${dueDate})`,
     );
+
+    const payload = {
+      courseId,
+      assignmentId,
+      courseName,
+      title: title || null,
+      dueDate,
+      url: href.startsWith("http") ? href : window.location.origin + href,
+    };
+
+    assignments.push(payload);
 
     chrome.runtime.sendMessage({
       type: MESSAGE_TYPES.ASSIGNMENT_DETECTED,
-      payload: {
-        courseId,
-        assignmentId,
-        title: title || null,
-        url: link.href,
-      },
+      payload: payload,
     });
   });
+
+  return assignments;
 }
 
 /**

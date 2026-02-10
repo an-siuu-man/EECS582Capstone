@@ -23,14 +23,31 @@
 
   assignments.forEach((assignment) => {
     const li = document.createElement("li");
-    const title =
-      assignment.data?.title ||
-      assignment.title ||
-      `Assignment ${assignment.assignmentId}`;
-    const status = assignment.status === "extracted" ? "✅" : "⏳";
+    
+    // Prefer extracted data, fall back to detection data (top-level)
+    const title = assignment.data?.title || assignment.title || `Assignment ${assignment.assignmentId}`;
+    const course = assignment.data?.courseName || assignment.courseName || `Course ${assignment.courseId}`;
+    const statusClass = assignment.status === "extracted" ? "extracted" : "pending";
+    
+    const rawDate = assignment.data?.dueDate || assignment.dueDate;
+    const dateStr = rawDate ? new Date(rawDate).toLocaleDateString() : "";
 
-    li.textContent = `${status} ${title}`;
-    li.title = `Course ${assignment.courseId} · Assignment ${assignment.assignmentId}`;
+    li.innerHTML = `
+      <div class="item-course">${escapeHtml(course)}</div>
+      <div class="item-title">${escapeHtml(title)}</div>
+      <div class="item-meta">
+        <span class="status-badge ${statusClass}" title="${assignment.status}"></span>
+        ${dateStr ? `<span>Due: ${escapeHtml(dateStr)}</span>` : "<span>No due date detected</span>"}
+      </div>
+    `;
+    
     listEl.appendChild(li);
   });
 })();
+
+function escapeHtml(str) {
+  if (!str) return "";
+  const div = document.createElement("div");
+  div.textContent = str;
+  return div.innerHTML;
+}
