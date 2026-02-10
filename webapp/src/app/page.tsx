@@ -85,7 +85,7 @@ export default function LandingPage() {
           <div className="container px-4 md:px-6">
             <div className="flex flex-col items-center justify-center space-y-4 text-center">
               <div className="space-y-2">
-                <h2 className="text-3xl font-heading font-bold tracking-tighter sm:text-5xl">
+                <h2 className="text-3xl font-sans font-bold tracking-tighter sm:text-5xl">
                   Intelligent Assistance
                 </h2>
                 <p className="max-w-[900px] text-muted-foreground md:text-xl/relaxed lg:text-base/relaxed xl:text-xl/relaxed">
@@ -98,7 +98,7 @@ export default function LandingPage() {
                 <div className="p-3 rounded-full bg-brand-blue/10 text-brand-blue">
                   <Zap className="h-8 w-8" />
                 </div>
-                <h3 className="text-xl font-heading font-bold">Instant Integration</h3>
+                <h3 className="text-xl font-sans font-bold">Instant Integration</h3>
                 <p className="text-center text-muted-foreground">
                   Seamlessly connects with Canvas LMS to detect new assignments instantly via our Chrome Extension.
                 </p>
@@ -107,7 +107,7 @@ export default function LandingPage() {
                 <div className="p-3 rounded-full bg-brand-gold/10 text-brand-gold">
                   <BookOpen className="h-8 w-8" />
                 </div>
-                <h3 className="text-xl font-heading font-bold">Smart Resources</h3>
+                <h3 className="text-xl font-sans font-bold">Smart Resources</h3>
                 <p className="text-center text-muted-foreground">
                   Automatically generates step-by-step guides, summaries, and curated resources for every task.
                 </p>
@@ -116,7 +116,7 @@ export default function LandingPage() {
                 <div className="p-3 rounded-full bg-brand-crimson/10 text-brand-crimson">
                   <Clock className="h-8 w-8" />
                 </div>
-                <h3 className="text-xl font-heading font-bold">Time Management</h3>
+                <h3 className="text-xl font-sans font-bold">Time Management</h3>
                 <p className="text-center text-muted-foreground">
                   Get realistic time estimates and scheduling suggestions to beat procrastination.
                 </p>
@@ -130,7 +130,7 @@ export default function LandingPage() {
           <div className="container px-4 md:px-6">
             <div className="grid gap-10 lg:grid-cols-2 items-center">
                <div className="space-y-4">
-                  <h2 className="text-3xl font-heading font-bold tracking-tighter sm:text-4xl md:text-5xl">
+                  <h2 className="text-3xl font-sans font-bold tracking-tighter sm:text-4xl md:text-5xl">
                      Agentic Workflow
                   </h2>
                   <p className="text-muted-foreground md:text-lg">
