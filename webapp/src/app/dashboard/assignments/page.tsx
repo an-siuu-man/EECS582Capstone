@@ -58,7 +58,7 @@ export default function AssignmentsPage() {
     <div className="space-y-8 h-full flex flex-col">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight">Assignments</h2>
+          <h2 className="text-3xl font-heading font-bold tracking-tight">Assignments</h2>
           <p className="text-muted-foreground">Manage your tasks and deadlines.</p>
         </div>
         <div className="flex items-center gap-2">

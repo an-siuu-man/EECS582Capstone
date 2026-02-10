@@ -20,7 +20,7 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-muted/40 px-4">
       <Link
         href="/"
-        className="absolute left-4 top-4 flex items-center gap-2 text-lg font-bold md:left-8 md:top-8"
+        className="absolute left-4 top-4 flex items-center gap-2 text-lg font-heading font-bold md:left-8 md:top-8"
       >
         <BrainCircuit className="h-6 w-6" />
         <span>Headstart AI</span>

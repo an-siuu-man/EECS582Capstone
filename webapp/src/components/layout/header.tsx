@@ -42,7 +42,7 @@ export function Header() {
         </Sheet>
         
         {/* Breadcrumb placeholder - in a real app this would be dynamic */}
-        <h2 className="text-lg font-semibold text-foreground hidden md:block">Dashboard</h2>
+        <h2 className="text-lg font-heading font-semibold text-foreground hidden md:block">Dashboard</h2>
       </div>
 
       <div className="flex items-center gap-2 md:gap-4">

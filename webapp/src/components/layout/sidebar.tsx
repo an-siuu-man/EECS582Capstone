@@ -8,10 +8,10 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 
 const links = [
-  { href: "/", label: "Dashboard", icon: Home },
-  { href: "/assignments", label: "Assignments", icon: FileText },
-  { href: "/resources", label: "Resources", icon: BookOpen },
-  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/dashboard", label: "Dashboard", icon: Home },
+  { href: "/dashboard/assignments", label: "Assignments", icon: FileText },
+  { href: "/dashboard/resources", label: "Resources", icon: BookOpen },
+  { href: "/dashboard/settings", label: "Settings", icon: Settings },
 ]
 
 interface SidebarContentProps {
@@ -26,7 +26,7 @@ export function SidebarContent({ className, onClick }: SidebarContentProps) {
     <div className={cn("flex flex-col h-full", className)}>
       <div className="p-6 flex items-center gap-2 border-b">
         <BrainCircuit className="h-6 w-6 text-primary" />
-        <span className="text-xl font-bold tracking-tight">Headstart AI</span>
+        <span className="text-xl font-heading font-bold tracking-tight">Headstart AI</span>
       </div>
       
       <div className="flex-1 py-6 px-3">

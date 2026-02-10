@@ -63,8 +63,8 @@ export default function Dashboard() {
     >
       <motion.div variants={item} className="flex items-center justify-between">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight">{greeting()}, {data.user.name.split(" ")[0]}</h2>
-          <p className="text-muted-foreground">Here's what's on your schedule today.</p>
+          <h2 className="text-3xl font-heading font-bold tracking-tight">{greeting()}, {data.user.name.split(" ")[0]}</h2>
+          <p className="text-muted-foreground">Here&apos;s what&apos;s on your schedule today.</p>
         </div>
         <div className="flex items-center gap-2">
           <Button>
