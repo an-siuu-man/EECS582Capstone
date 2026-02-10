@@ -99,8 +99,8 @@ export default function Dashboard() {
         ))}
       </motion.div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
-        <motion.div variants={item} className="col-span-4">
+      <div className="grid gap-4 lg:grid-cols-7">
+        <motion.div variants={item} className="lg:col-span-4">
           <Card className="h-full">
             <CardHeader>
               <CardTitle>Upcoming Assignments</CardTitle>
@@ -141,7 +141,7 @@ export default function Dashboard() {
           </Card>
         </motion.div>
         
-        <motion.div variants={item} className="col-span-3 space-y-4">
+        <motion.div variants={item} className="lg:col-span-3 space-y-4">
            <Card>
             <CardHeader>
               <CardTitle>Recent Resources</CardTitle>

@@ -25,25 +25,27 @@ export default function LandingPage() {
   return (
     <div className="flex flex-col min-h-screen">
       {/* Navbar */}
-      <header className="px-4 lg:px-6 h-16 flex items-center backdrop-blur-sm bg-background/80 fixed w-full z-50 border-b border-brand-gold/20">
-        <Link className="flex items-center justify-center gap-2" href="#">
-          <BrainCircuit className="h-6 w-6 text-brand-blue" />
-          <span className="text-xl font-heading font-bold tracking-wide text-foreground">Headstart AI</span>
-        </Link>
-        <nav className="ml-auto flex gap-4 sm:gap-6">
-          <Link className="text-sm font-medium hover:text-brand-blue transition-colors flex items-center" href="#features">
-            Features
+      <header className="h-16 flex items-center backdrop-blur-sm bg-background/80 fixed w-full z-50 border-b border-brand-gold/20 px-4 md:px-6">
+        <div className="container mx-auto flex items-center">
+          <Link className="flex items-center justify-center gap-2" href="#">
+            <BrainCircuit className="h-6 w-6 text-brand-blue" />
+            <span className="text-xl font-heading font-bold tracking-wide text-foreground">Headstart AI</span>
           </Link>
-          <Link className="text-sm font-medium hover:text-brand-blue transition-colors flex items-center" href="#how-it-works">
-            How it Works
-          </Link>
-          <Link href="/login">
-            <Button variant="ghost" size="sm">Log In</Button>
-          </Link>
-          <Link href="/signup">
-            <Button size="sm" className="bg-brand-blue hover:bg-brand-blue/90">Get Started</Button>
-          </Link>
-        </nav>
+          <nav className="ml-auto flex gap-2 sm:gap-6">
+            <Link className="hidden md:flex text-sm font-medium hover:text-brand-blue transition-colors items-center" href="#features">
+              Features
+            </Link>
+            <Link className="hidden md:flex text-sm font-medium hover:text-brand-blue transition-colors items-center" href="#how-it-works">
+              How it Works
+            </Link>
+            <Link href="/login">
+              <Button variant="ghost" size="sm">Log In</Button>
+            </Link>
+            <Link href="/signup">
+              <Button size="sm" className="bg-brand-blue hover:bg-brand-blue/90">Get Started</Button>
+            </Link>
+          </nav>
+        </div>
       </header>
 
       <main className="flex-1 pt-16">
@@ -55,7 +57,7 @@ export default function LandingPage() {
            <div className="absolute right-[20%] bottom-[20%] -z-10 m-auto h-[310px] w-[310px] rounded-full bg-brand-crimson/10 opacity-30 blur-[100px]"></div>
           
           <motion.div 
-            className="container px-4 md:px-6 flex flex-col items-center text-center space-y-4"
+            className="container mx-auto px-4 md:px-6 flex flex-col items-center text-center space-y-4"
             variants={container}
             initial="hidden"
             animate="show"
@@ -82,7 +84,7 @@ export default function LandingPage() {
 
         {/* Features Section */}
         <section id="features" className="w-full py-12 md:py-24 lg:py-32 bg-muted/30 border-y border-brand-gold/10">
-          <div className="container px-4 md:px-6">
+          <div className="container mx-auto px-4 md:px-6">
             <div className="flex flex-col items-center justify-center space-y-4 text-center">
               <div className="space-y-2">
                 <h2 className="text-3xl font-sans font-bold tracking-tighter sm:text-5xl">
@@ -127,7 +129,7 @@ export default function LandingPage() {
         
         {/* How it Works / Tech Stack */}
          <section id="how-it-works" className="w-full py-12 md:py-24 lg:py-32">
-          <div className="container px-4 md:px-6">
+          <div className="container mx-auto px-4 md:px-6">
             <div className="grid gap-10 lg:grid-cols-2 items-center">
                <div className="space-y-4">
                   <h2 className="text-3xl font-sans font-bold tracking-tighter sm:text-4xl md:text-5xl">
@@ -165,16 +167,18 @@ export default function LandingPage() {
         </section>
       </main>
       
-      <footer className="flex flex-col gap-2 sm:flex-row py-6 w-full shrink-0 items-center px-4 md:px-6 border-t border-brand-gold/20">
-        <p className="text-xs text-muted-foreground">© 2026 Headstart AI. All rights reserved.</p>
-        <nav className="sm:ml-auto flex gap-4 sm:gap-6">
-          <Link className="text-xs hover:underline underline-offset-4 hover:text-brand-blue" href="#">
-            Terms of Service
-          </Link>
-          <Link className="text-xs hover:underline underline-offset-4 hover:text-brand-blue" href="#">
-            Privacy
-          </Link>
-        </nav>
+      <footer className="w-full py-6 px-4 md:px-6 border-t border-brand-gold/20">
+        <div className="container mx-auto flex flex-col gap-2 sm:flex-row items-center">
+          <p className="text-xs text-muted-foreground">© 2026 Headstart AI. All rights reserved.</p>
+          <nav className="sm:ml-auto flex gap-4 sm:gap-6">
+            <Link className="text-xs hover:underline underline-offset-4 hover:text-brand-blue" href="#">
+              Terms of Service
+            </Link>
+            <Link className="text-xs hover:underline underline-offset-4 hover:text-brand-blue" href="#">
+              Privacy
+            </Link>
+          </nav>
+        </div>
       </footer>
     </div>
   )

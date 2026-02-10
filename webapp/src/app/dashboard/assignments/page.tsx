@@ -23,6 +23,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { assignments, courses, getCourse } from "@/lib/data"
+import { Assignment } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 const container = {
@@ -108,7 +109,7 @@ export default function AssignmentsPage() {
   )
 }
 
-function AssignmentList({ assignments }: { assignments: typeof assignments }) {
+function AssignmentList({ assignments }: { assignments: Assignment[] }) {
   if (assignments.length === 0) {
      return (
         <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
