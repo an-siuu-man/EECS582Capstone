@@ -1,127 +1,145 @@
 /**
  * Headstart Widget Injector
  *
- * Injects a small UI widget into the Canvas assignment page so students
- * can see at a glance that Headstart has processed the assignment and
- * can click through to the generated guide.
- *
- * The widget is intentionally minimal – a lightweight vanilla-JS component
- * injected into Canvas' right sidebar. A full React widget upgrade is
- * planned for a later sprint.
+ * Injects a floating sidebar into the Canvas assignment page.
+ * The sidebar slides in automatically and can be toggled via a button.
  */
 
 import { CANVAS_SELECTORS, WIDGET } from "../../shared/constants.js";
 
+const SIDEBAR_ID = "headstart-sidebar";
+const TOGGLE_ID = "headstart-toggle-btn";
+
 /**
- * Inject the Headstart widget into the Canvas page.
+ * Inject the Headstart sidebar and toggle button.
  *
  * @param {import('../extractors/assignment-extractor.js').AssignmentData} assignmentData
  */
 export function injectWidget(assignmentData) {
-  // Avoid duplicate injection
-  if (document.getElementById(WIDGET.CONTAINER_ID)) {
-    console.log("[Headstart] Widget already injected – updating.");
-    updateWidget(assignmentData);
-    return;
-  }
+  // Prevent duplicate injection
+  if (document.getElementById(SIDEBAR_ID)) return;
 
-  const injectionTarget = findInjectionTarget();
-  if (!injectionTarget) {
-    console.warn("[Headstart] Could not find injection target in Canvas DOM.");
-    return;
-  }
+  injectToggle();
+  injectSidebar(assignmentData);
 
-  const widget = createWidgetElement(assignmentData);
-  injectionTarget.prepend(widget);
-  console.log("[Headstart] Widget injected successfully.");
-}
-
-/**
- * Update an already-injected widget with new data.
- */
-function updateWidget(assignmentData) {
-  const container = document.getElementById(WIDGET.CONTAINER_ID);
-  if (!container) return;
-
-  const statusEl = container.querySelector(".headstart-status");
-  if (statusEl) {
-    statusEl.textContent = buildStatusText(assignmentData);
-  }
+  // Auto-open sidebar on load
+  setTimeout(() => {
+    toggleSidebar(true);
+  }, 500);
 }
 
 // ──────────────────────────────────────────────
-// DOM Construction
+// Toggle Button
 // ──────────────────────────────────────────────
 
-function findInjectionTarget() {
-  // Try each candidate selector in order of preference
-  const selectors = CANVAS_SELECTORS.WIDGET_INJECTION_POINT.split(",").map(
-    (s) => s.trim(),
-  );
+function injectToggle() {
+  const btn = document.createElement("button");
+  btn.id = TOGGLE_ID;
+  btn.className = "headstart-toggle";
+  btn.innerHTML = "🚀";
+  btn.title = "Toggle Headstart AI";
+  
+  btn.onclick = () => {
+    const sidebar = document.getElementById(SIDEBAR_ID);
+    const isOpen = sidebar.classList.contains("open");
+    toggleSidebar(!isOpen);
+  };
 
-  for (const selector of selectors) {
-    const el = document.querySelector(selector);
-    if (el) return el;
-  }
-
-  return null;
+  document.body.appendChild(btn);
 }
 
-function createWidgetElement(assignmentData) {
-  const container = document.createElement("div");
-  container.id = WIDGET.CONTAINER_ID;
-  container.className = "headstart-widget";
+// ──────────────────────────────────────────────
+// Sidebar Injection
+// ──────────────────────────────────────────────
 
-  container.innerHTML = `
-    <div class="headstart-widget__header">
-      <span class="headstart-widget__logo">🚀</span>
-      <span class="headstart-widget__title">Headstart AI</span>
-    </div>
-    <div class="headstart-widget__body">
-      <p class="headstart-status">${buildStatusText(assignmentData)}</p>
-      <div class="headstart-widget__details">
-        ${assignmentData.dueDate ? `<p class="headstart-detail"><strong>Due:</strong> ${escapeHtml(assignmentData.dueDate)}</p>` : ""}
-        ${assignmentData.pointsPossible ? `<p class="headstart-detail"><strong>Points:</strong> ${escapeHtml(assignmentData.pointsPossible)}</p>` : ""}
-        ${assignmentData.rubric ? `<p class="headstart-detail"><strong>Rubric:</strong> ${assignmentData.rubric.criteria.length} criteria</p>` : ""}
+function injectSidebar(data) {
+  const sidebar = document.createElement("div");
+  sidebar.id = SIDEBAR_ID;
+  sidebar.className = "headstart-sidebar";
+
+  const isList = !!data.listAssignments;
+  
+  // Prepare content
+  let contentHtml = "";
+
+  if (isList) {
+    contentHtml = `
+      <div class="headstart-sidebar__course-label">${escapeHtml(data.courseName || "Course Overview")}</div>
+      <ul class="headstart-sidebar__list">
+        ${data.listAssignments.map(a => `
+          <li class="headstart-sidebar__item">
+            <div class="headstart-sidebar__item-title">${escapeHtml(a.title)}</div>
+            <div class="headstart-sidebar__item-meta">
+              ${a.dueDate ? `Due: ${escapeHtml(a.dueDate)}` : "No due date"}
+            </div>
+          </li>
+        `).join("")}
+      </ul>
+    `;
+  } else {
+    // Single Assignment View
+    contentHtml = `
+      <div class="headstart-sidebar__course-label">${escapeHtml(data.courseName || "Current Course")}</div>
+      <div class="headstart-sidebar__item">
+        <div class="headstart-sidebar__item-title">${escapeHtml(data.title)}</div>
+        <div class="headstart-sidebar__item-meta">
+           ${data.dueDate ? `Due: ${escapeHtml(data.dueDate)}` : ""}
+           <br>
+           ${data.pointsPossible ? `${escapeHtml(data.pointsPossible)} Points` : ""}
+        </div>
       </div>
-      <button class="headstart-widget__btn" id="headstart-generate-btn">
-        View Guide
+      ${data.rubric ? `<p style="margin-top:12px; font-size:13px;">Rubric available: ${data.rubric.criteria.length} criteria</p>` : ""}
+    `;
+  }
+
+  sidebar.innerHTML = `
+    <div class="headstart-sidebar__header">
+      <div class="headstart-sidebar__logo-area">
+        <span>🚀</span>
+        <span class="headstart-sidebar__title">Headstart AI</span>
+      </div>
+      <button class="headstart-sidebar__close">&times;</button>
+    </div>
+    
+    <div class="headstart-sidebar__body">
+      ${contentHtml}
+    </div>
+
+    <div class="headstart-sidebar__action-area">
+      <button class="headstart-sidebar__btn">
+        ${isList ? "View Full Dashboard" : "Generate Guide"}
       </button>
     </div>
   `;
 
-  // Attach event listener
-  container
-    .querySelector("#headstart-generate-btn")
-    .addEventListener("click", () => {
-      handleViewGuide(assignmentData);
-    });
+  // Close button handler
+  sidebar.querySelector(".headstart-sidebar__close").onclick = () => toggleSidebar(false);
 
-  return container;
+  // Action button stub
+  sidebar.querySelector(".headstart-sidebar__btn").onclick = () => {
+    alert("Headstart AI Guide Generation coming soon!");
+  };
+
+  document.body.appendChild(sidebar);
 }
 
-function buildStatusText(data) {
-  if (data.title) {
-    return `Assignment detected: "${data.title}"`;
+function toggleSidebar(open) {
+  const sidebar = document.getElementById(SIDEBAR_ID);
+  if (!sidebar) return;
+
+  if (open) {
+    sidebar.classList.add("open");
+  } else {
+    sidebar.classList.remove("open");
   }
-  return "Assignment detected – extracting data…";
-}
-
-function handleViewGuide(assignmentData) {
-  // TODO: Open the generated guide (web app URL or side panel)
-  console.log("[Headstart] View guide requested for:", assignmentData.meta);
-  alert(
-    "Headstart AI guide generation coming soon!\n\n" +
-      `Assignment: ${assignmentData.title}\n` +
-      `Course ID: ${assignmentData.meta.courseId}`,
-  );
 }
 
 // ──────────────────────────────────────────────
-// Utility
+// Helpers
 // ──────────────────────────────────────────────
 
 function escapeHtml(str) {
+  if (!str) return "";
   const div = document.createElement("div");
   div.textContent = str;
   return div.innerHTML;

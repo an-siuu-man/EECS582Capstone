@@ -9,6 +9,7 @@ import { extractAssignmentData } from "../../src/content/extractors/assignment-e
  */
 function buildAssignmentDOM({
   title,
+  courseName,
   description,
   dueDate,
   points,
@@ -16,6 +17,13 @@ function buildAssignmentDOM({
   rubric,
 } = {}) {
   document.body.innerHTML = `
+    <nav id="breadcrumbs">
+      <ul>
+        <li><a href="/">Home</a></li>
+        <li><a href="/courses/101"><span class="ellipsible">${courseName || "Course 101"}</span></a></li>
+        <li><span>Assignment</span></li>
+      </ul>
+    </nav>
     <div id="assignment_show">
       <h1 class="title">${title || ""}</h1>
       <div class="description">
@@ -81,6 +89,12 @@ describe("extractAssignmentData", () => {
     const doc = buildAssignmentDOM({ title: "Essay on AI Ethics" });
     const data = extractAssignmentData(doc, pageInfo);
     expect(data.title).toBe("Essay on AI Ethics");
+  });
+
+  test("extracts course name", () => {
+    const doc = buildAssignmentDOM({ courseName: "EECS 582" });
+    const data = extractAssignmentData(doc, pageInfo);
+    expect(data.courseName).toBe("EECS 582");
   });
 
   test("extracts description as HTML and text", () => {

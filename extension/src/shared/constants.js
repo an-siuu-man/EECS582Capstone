@@ -39,6 +39,15 @@ export const CANVAS_SELECTORS = {
   POINTS_POSSIBLE: ".points_possible, .assignment_value",
   SUBMISSION_TYPE: ".submission_types, #submit_assignment .submission-type",
 
+  // Course Info
+  COURSE_NAME:
+    "#breadcrumbs li:nth-of-type(2) .ellipsible, #breadcrumbs li:nth-of-type(2) a, .ic-app-header__menu-list-link .ic-avatar__label",
+
+  // List Page
+  LIST_ASSIGNMENT_ROW: ".assignment, .ig-row, .item-group-condensed .ig-row",
+  LIST_ASSIGNMENT_TITLE: ".ig-title, .item-group-condensed .ig-title, a.title",
+  LIST_ASSIGNMENT_DUE_DATE: ".assignment-date-due, .due_date_display, .ig-details .due_at",
+
   // Rubric
   RUBRIC_CONTAINER:
     "#rubrics .rubric_container, .rubric_summary, #rubric_summary_holder",
@@ -58,4 +67,6 @@ export const CANVAS_SELECTORS = {
 /** Widget element IDs */
 export const WIDGET = {
   CONTAINER_ID: "headstart-ai-widget",
+  MODAL_ID: "headstart-ai-modal",
+  OVERLAY_ID: "headstart-ai-overlay",
 };

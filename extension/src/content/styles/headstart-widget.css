@@ -1,96 +1,158 @@
 /*
  * Headstart AI – Injected Widget Styles
  *
- * Scoped to .headstart-widget to avoid leaking into Canvas styles.
- * Uses CSS custom properties for theming.
+ * Scoped to .headstart-widget and .headstart-sidebar to avoid leaking into Canvas styles.
+ * Uses CSS custom properties for theming (matching webapp).
  */
 
 :root {
-  --hs-primary: #4caf50;
-  --hs-primary-hover: #388e3c;
+  /* Brand Blue #0051BA */
+  --hs-primary: #0051BA;
+  --hs-primary-hover: #003c8f;
   --hs-bg: #ffffff;
   --hs-border: #e0e0e0;
   --hs-text: #333333;
   --hs-text-secondary: #666666;
   --hs-radius: 8px;
-  --hs-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  --hs-shadow: -2px 0 8px rgba(0, 0, 0, 0.15);
 }
 
-.headstart-widget {
-  font-family:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
-    sans-serif;
+/* ── Floating Toggle Button ── */
+.headstart-toggle {
+  position: fixed;
+  top: 120px;
+  right: 0;
+  width: 48px;
+  height: 48px;
+  background: var(--hs-primary);
+  color: #fff;
+  border: none;
+  border-radius: 8px 0 0 8px;
+  box-shadow: -2px 2px 5px rgba(0,0,0,0.2);
+  cursor: pointer;
+  z-index: 9998;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  transition: transform 0.2s;
+}
+
+.headstart-toggle:hover {
+  width: 52px;
+}
+
+/* ── Full Height Sidebar ── */
+.headstart-sidebar {
+  position: fixed;
+  top: 0;
+  right: -320px; /* Hidden by default */
+  width: 320px;
+  height: 100vh;
   background: var(--hs-bg);
-  border: 1px solid var(--hs-border);
-  border-radius: var(--hs-radius);
   box-shadow: var(--hs-shadow);
-  margin-bottom: 16px;
-  overflow: hidden;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  transition: right 0.3s ease-in-out;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
-.headstart-widget__header {
+.headstart-sidebar.open {
+  right: 0;
+}
+
+/* ── Sidebar Header ── */
+.headstart-sidebar__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  background: var(--hs-primary);
+  color: #ffffff;
+}
+
+.headstart-sidebar__logo-area {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 16px;
-  background: linear-gradient(135deg, var(--hs-primary) 0%, #66bb6a 100%);
-  color: #ffffff;
 }
 
-.headstart-widget__logo {
-  font-size: 20px;
-}
-
-.headstart-widget__title {
+.headstart-sidebar__title {
   font-weight: 600;
+  font-size: 16px;
+}
+
+.headstart-sidebar__close {
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 4px;
+}
+
+/* ── Sidebar Body ── */
+.headstart-sidebar__body {
+  flex: 1;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.headstart-sidebar__course-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  color: var(--hs-primary);
+  font-weight: 700;
+  margin-bottom: 8px;
+  letter-spacing: 0.5px;
+}
+
+.headstart-sidebar__list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.headstart-sidebar__item {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--hs-border);
+}
+
+.headstart-sidebar__item:last-child {
+  border-bottom: none;
+}
+
+.headstart-sidebar__item-title {
   font-size: 14px;
-  letter-spacing: 0.3px;
-}
-
-.headstart-widget__body {
-  padding: 12px 16px;
-}
-
-.headstart-status {
-  font-size: 13px;
+  font-weight: 600;
   color: var(--hs-text);
-  margin: 0 0 8px 0;
-  line-height: 1.4;
+  margin-bottom: 4px;
+  line-height: 1.3;
 }
 
-.headstart-widget__details {
-  margin-bottom: 12px;
-}
-
-.headstart-detail {
+.headstart-sidebar__item-meta {
   font-size: 12px;
   color: var(--hs-text-secondary);
-  margin: 4px 0;
 }
 
-.headstart-detail strong {
-  color: var(--hs-text);
+.headstart-sidebar__action-area {
+  padding: 16px;
+  border-top: 1px solid var(--hs-border);
+  background: #f9f9f9;
 }
 
-.headstart-widget__btn {
-  display: block;
+.headstart-sidebar__btn {
   width: 100%;
-  padding: 8px 16px;
+  padding: 10px;
   background: var(--hs-primary);
-  color: #ffffff;
+  color: #fff;
   border: none;
-  border-radius: 4px;
-  font-size: 13px;
-  font-weight: 500;
+  border-radius: 6px;
+  font-weight: 600;
   cursor: pointer;
-  transition: background-color 0.2s ease;
 }
 
-.headstart-widget__btn:hover {
+.headstart-sidebar__btn:hover {
   background: var(--hs-primary-hover);
-}
-
-.headstart-widget__btn:focus-visible {
-  outline: 2px solid var(--hs-primary);
-  outline-offset: 2px;
 }

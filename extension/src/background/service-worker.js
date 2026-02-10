@@ -44,7 +44,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
  * Deduplicates by (courseId, assignmentId) so we don't re-process.
  */
 async function handleAssignmentDetected(payload, tab) {
-  const { courseId, assignmentId, url, title } = payload;
+  const { courseId, assignmentId, url, title, courseName, dueDate } = payload;
 
   // Skip list-page events with no assignmentId
   if (!assignmentId) return;
@@ -53,38 +53,29 @@ async function handleAssignmentDetected(payload, tab) {
 
   const existing = await chrome.storage.local.get(storageKey);
 
-  if (existing[storageKey]) {
-    // If we now have a title but didn't before, update it
-    if (title && !existing[storageKey].title) {
-      await chrome.storage.local.set({
-        [storageKey]: { ...existing[storageKey], title },
-      });
-    }
-    console.log(
-      `[Headstart SW] Assignment ${assignmentId} already known – skipping.`,
-    );
-    return;
-  }
+  // Update logic: if we have more info now (title, courseName, dueDate), merge it
+  const update = {
+    courseId,
+    assignmentId,
+    url,
+    detectedAt: existing[storageKey]?.detectedAt || new Date().toISOString(),
+    status: existing[storageKey]?.status || "detected",
+    title: title || existing[storageKey]?.title || null,
+    courseName: courseName || existing[storageKey]?.courseName || null,
+    dueDate: dueDate || existing[storageKey]?.dueDate || null,
+  };
 
-  // Persist a stub so we know we've seen this assignment
-  await chrome.storage.local.set({
-    [storageKey]: {
-      courseId,
-      assignmentId,
-      title: title || null,
-      url,
-      detectedAt: new Date().toISOString(),
-      status: "detected",
-    },
-  });
+  await chrome.storage.local.set({ [storageKey]: update });
 
   console.log(
-    `[Headstart SW] New assignment detected: course=${courseId} assignment=${assignmentId}`,
+    `[Headstart SW] Assignment updated: course=${courseId} assignment=${assignmentId} title="${update.title}"`,
   );
 
-  // Update badge to signal new assignment
-  chrome.action.setBadgeText({ text: "!", tabId: tab.id });
-  chrome.action.setBadgeBackgroundColor({ color: "#4CAF50", tabId: tab.id });
+  // Update badge to signal new assignment if it's truly new or was just detected
+  if (!existing[storageKey]) {
+    chrome.action.setBadgeText({ text: "!", tabId: tab.id });
+    chrome.action.setBadgeBackgroundColor({ color: "#0051BA", tabId: tab.id });
+  }
 }
 
 /**
