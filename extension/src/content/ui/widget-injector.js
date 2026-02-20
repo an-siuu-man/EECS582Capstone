@@ -189,8 +189,22 @@ function injectSidebar(data) {
       }
     }
 
+    if (msg.type === "HEADSTART_RESULT") {
+      if (statusEl) statusEl.textContent = "Status: Guide generated ✅";
+      if (outputEl) {
+        outputEl.style.display = "block";
+        outputEl.textContent = JSON.stringify(msg.result, null, 2);
+      }
+    }
+
     if (msg.type === "HEADSTART_ERROR") {
       if (statusEl) statusEl.textContent = `Status: Error — ${msg.error}`;
+    }
+
+    if (msg.type === "HEADSTART_RESULT") {
+      statusEl.textContent = "Status: Guide generated ✅";
+      outputEl.style.display = "block";
+      outputEl.textContent = JSON.stringify(msg.result, null, 2);
     }
   });
 

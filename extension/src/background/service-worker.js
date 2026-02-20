@@ -289,12 +289,80 @@ async function handleStartHeadstartRun(tab, pageTitle) {
   if ((!payload.title || payload.title.trim() === "") && pageTitle) {
     payload.title = pageTitle.replace(" - Assignments", "").trim();
   }
-  
-  // NEW: Send payload back to the content script (sidebar) for display/debug
-  chrome.tabs.sendMessage(tab.id, {
-    type: "HEADSTART_PAYLOAD",
-    payload,
-  });
+
+  // NEW: Send payload to webapp backend (local dev)
+  const BACKEND = "http://localhost:3000";
+
+  try {
+    // 1) Ingest
+    const res = await fetch(`${BACKEND}/api/ingest-assignment`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`Ingest failed (${res.status}): ${errText}`);
+    }
+
+    const json = await res.json();
+
+    console.log("[Headstart SW] calling /api/run-agent now…");
+
+    // 2) Run agent (proxy endpoint on webapp)
+    let runResp;
+    try {
+      runResp = await fetch(`${BACKEND}/api/run-agent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          assignment_uuid: json.assignment_uuid,
+          payload: { ...payload, assignment_uuid: json.assignment_uuid },
+          pdf_text: "",
+        }),
+      });
+    } catch (e) {
+      throw new Error(`Fetch to /api/run-agent failed: ${String(e?.message || e)}`);
+      }
+
+    // IMPORTANT: clone() lets us read the body even if something else tries to read it
+    let raw = "";
+    try {
+      raw = await runResp.clone().text();
+    } catch (e) {
+      throw new Error(
+        `Could not read /api/run-agent response body (status ${runResp?.status}): ${String(
+          e?.message || e
+        )}`
+      );
+    }
+
+    console.log("[Headstart SW] /api/run-agent status:", runResp.status);
+    console.log("[Headstart SW] /api/run-agent raw (first 300):", raw.slice(0, 300));
+
+    if (!runResp.ok) {
+      throw new Error(`run-agent failed (${runResp.status}): ${raw.slice(0, 300)}`);
+    }
+
+    let ai;
+    try {
+      ai = JSON.parse(raw);
+      
+    } catch {
+      throw new Error(`run-agent returned non-JSON: ${raw.slice(0, 300)}`);
+    }
+
+    chrome.tabs.sendMessage(tab.id, {
+      type: "HEADSTART_RESULT",
+      result: ai,
+    });
+  } catch (e) {
+    chrome.tabs.sendMessage(tab.id, {
+      type: "HEADSTART_ERROR",
+      error: String(e?.message || e),
+    });
+  }
 }
 
 // ──────────────────────────────────────────────

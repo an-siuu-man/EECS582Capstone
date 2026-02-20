@@ -6,7 +6,8 @@
   "permissions": ["storage", "activeTab", "alarms"],
   "host_permissions": [
     "https://*.instructure.com/*",
-    "https://canvas.ku.edu/*"
+    "https://canvas.ku.edu/*",
+    "http://localhost:3000/*"
   ],
   "background": {
     "service_worker": "dist/background/service-worker.js",
