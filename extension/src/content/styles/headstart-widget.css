@@ -1,12 +1,8 @@
 /*
  * Headstart AI – Injected Widget Styles
- *
- * Scoped to .headstart-widget and .headstart-sidebar to avoid leaking into Canvas styles.
- * Uses CSS custom properties for theming (matching webapp).
  */
 
 :root {
-  /* Brand Blue #0051BA */
   --hs-primary: #0051BA;
   --hs-primary-hover: #003c8f;
   --hs-bg: #ffffff;
@@ -17,7 +13,7 @@
   --hs-shadow: -2px 0 8px rgba(0, 0, 0, 0.15);
 }
 
-/* ── Floating Toggle Button ── */
+/* Toggle */
 .headstart-toggle {
   position: fixed;
   top: 120px;
@@ -35,18 +31,17 @@
   align-items: center;
   justify-content: center;
   font-size: 24px;
-  transition: transform 0.2s;
 }
 
 .headstart-toggle:hover {
   width: 52px;
 }
 
-/* ── Full Height Sidebar ── */
+/* Sidebar */
 .headstart-sidebar {
   position: fixed;
   top: 0;
-  right: -320px; /* Hidden by default */
+  right: -320px;
   width: 320px;
   height: 100vh;
   background: var(--hs-bg);
@@ -62,7 +57,7 @@
   right: 0;
 }
 
-/* ── Sidebar Header ── */
+/* Header */
 .headstart-sidebar__header {
   display: flex;
   align-items: center;
@@ -92,7 +87,7 @@
   padding: 4px;
 }
 
-/* ── Sidebar Body ── */
+/* Body */
 .headstart-sidebar__body {
   flex: 1;
   padding: 16px;
@@ -136,6 +131,20 @@
   color: var(--hs-text-secondary);
 }
 
+.headstart-sidebar__status {
+  margin-top: 12px;
+  font-size: 13px;
+  opacity: 0.85;
+}
+
+.headstart-sidebar__output {
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--hs-text);
+  line-height: 1.45;
+}
+
+/* Action area */
 .headstart-sidebar__action-area {
   padding: 16px;
   border-top: 1px solid var(--hs-border);
@@ -156,3 +165,93 @@
 .headstart-sidebar__btn:hover {
   background: var(--hs-primary-hover);
 }
+
+/* Chat */
+.headstart-chat-messages {
+  height: 500px;               
+  overflow-y: auto;   
+  border: 1px solid rgba(0, 81, 186, 0.20);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.90);
+}
+
+.headstart-chat-bubble {
+  max-width: 95%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  margin: 8px 0;
+  font-size: 13px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  border: 1px solid rgba(0,0,0,0.08);
+}
+
+.headstart-chat-bubble.user {
+  margin-left: auto;
+  background: rgba(0, 81, 186, 0.08);
+}
+
+.headstart-chat-bubble.assistant {
+  margin-right: auto;
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.headstart-chat-composer {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+  width: 100%;
+}
+
+.headstart-chat-input {
+  flex: 1;
+  resize: none;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 81, 186, 0.30);
+  font-size: 13px;
+}
+
+.headstart-chat-send {
+  padding: 0 12px;
+  border-radius: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  background: #ffffff;
+  color: var(--hs-primary);
+  border: 1px solid rgba(0, 81, 186, 0.40);
+  white-space: nowrap;
+}
+
+/* Loading bubble animation */
+.headstart-loading-bubble {
+  display: inline-flex;
+  align-items: center;
+}
+
+.hs-dots {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 0;
+}
+
+.hs-dots span {
+  display: inline-block;               
+  width: 6px;
+  height: 6px;
+  border-radius: 500px;
+  background: rgba(0, 0, 0, 0.45);
+  animation: hsDotPulse 1s infinite ease-in-out;
+}
+
+.hs-dots span:nth-child(2) { animation-delay: 0.15s; }
+.hs-dots span:nth-child(3) { animation-delay: 0.30s; }
+
+@keyframes hsDotPulse {
+  0%, 50%, 100% { transform: scale(0.7); opacity: 0.45; }
+  50% { transform: scale(1.0); opacity: 1.0; }
+}
+
