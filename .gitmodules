@@ -1,0 +1,4 @@
+[submodule "internal"]
+	path = internal
+	url = ../headstart-internal
+	branch = main
