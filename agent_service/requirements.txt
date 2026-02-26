@@ -3,4 +3,5 @@ uvicorn[standard]
 python-dotenv
 pydantic
 langchain
-langchain_google_genai
+langchain-nvidia-ai-endpoints
+pymupdf

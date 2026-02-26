@@ -9,29 +9,38 @@
  *  4. Inject the Headstart widget into the page.
  */
 
-import { CANVAS_URL_PATTERNS, MESSAGE_TYPES, CANVAS_SELECTORS } from "../shared/constants.js";
+import {
+  MESSAGE_TYPES,
+  CANVAS_SELECTORS,
+} from "../shared/constants.js";
 import { detectCanvasPage } from "./detectors/page-detector.js";
 import { extractAssignmentData } from "./extractors/assignment-extractor.js";
 import { injectWidget } from "./ui/widget-injector.js";
+import { createLogger } from "../shared/logger.js";
+
+const log = createLogger("Content");
 
 (async function main() {
-  console.log("[Headstart] Content script loaded on:", window.location.href);
+  log.info("Content script loaded on:", window.location.href);
 
   // ── Step 1: Detect page type ───────────────────────────────
   const pageInfo = detectCanvasPage(window.location.href);
 
   if (!pageInfo) {
-    console.log(
-      "[Headstart] Not a recognised Canvas assignment page – exiting.",
-    );
+    log.debug("Not a recognised Canvas assignment page – exiting.");
     return;
   }
 
-  console.log("[Headstart] Detected page:", pageInfo);
+  log.info(
+    "Detected page:",
+    pageInfo.type,
+    `| course=${pageInfo.courseId} assignment=${pageInfo.assignmentId ?? "(list)"}`,
+  );
 
   // Extract course name once for either page type
   const courseNameEl = document.querySelector(CANVAS_SELECTORS.COURSE_NAME);
   const courseName = courseNameEl ? courseNameEl.textContent.trim() : null;
+  log.debug("Course name:", courseName ?? "(not found)");
 
   // ── Step 2: Handle based on page type ──────────────────────
   if (pageInfo.type === "single_assignment" && pageInfo.assignmentId) {
@@ -46,12 +55,20 @@ import { injectWidget } from "./ui/widget-injector.js";
       },
     });
 
-    // Wait briefly for Canvas to finish rendering dynamic content
-    await waitForSelector("#assignment_show, .assignment-title", 5000);
+    // extractAssignmentData tries the Canvas REST API first (no DOM needed),
+    // then falls back to DOM scraping if the API call fails.
+    const assignmentData = await extractAssignmentData(document, pageInfo);
 
-    const assignmentData = extractAssignmentData(document, pageInfo);
-
-    console.log("[Headstart] Extracted assignment data:", assignmentData);
+    log.info(
+      "Extracted assignment data:",
+      `title="${assignmentData.title}"`,
+      `| dueDate=${assignmentData.dueDate ?? "none"}`,
+      `| points=${assignmentData.pointsPossible ?? "none"}`,
+      `| rubric=${assignmentData.rubric ? assignmentData.rubric.criteria?.length + " criteria" : "none"}`,
+      `| descLen=${assignmentData.descriptionText?.length ?? 0}`,
+      `| pdfs=${assignmentData.pdfAttachments?.length ?? 0}`,
+    );
+    log.debug("Full extracted data:", assignmentData);
 
     // Send extracted data to service worker
     chrome.runtime.sendMessage({
@@ -64,11 +81,22 @@ import { injectWidget } from "./ui/widget-injector.js";
     });
 
     // ── Step 3: Inject the widget ──────────────────────────────
+    log.debug("Injecting widget…");
     injectWidget(assignmentData);
   } else if (pageInfo.type === "assignment_list") {
     // ── Assignment list page: detect each assignment with its name and due date ──
-    await waitForSelector(".assignment, .ig-row, #assignment_group", 5000);
+    const settled = await waitForSelector(
+      ".assignment, .ig-row, #assignment_group",
+      5000,
+    );
+    if (!settled)
+      log.warn("waitForSelector (list page) timed out – scraping anyway");
+
     const assignments = scrapeAssignmentList(pageInfo.courseId, courseName);
+
+    log.info(
+      `Assignment list scrape complete: ${assignments.length} assignments found`,
+    );
 
     // Show automatic Sidebar on the list page
     if (assignments.length > 0) {
@@ -76,7 +104,7 @@ import { injectWidget } from "./ui/widget-injector.js";
         title: "Course Overview",
         courseName: courseName,
         meta: { courseId: pageInfo.courseId },
-        listAssignments: assignments
+        listAssignments: assignments,
       });
     }
   }
@@ -109,12 +137,14 @@ function scrapeAssignmentList(courseId, courseName) {
     seen.add(assignmentId);
 
     const title = link.textContent.trim();
-    const dueDateEl = row.querySelector(CANVAS_SELECTORS.LIST_ASSIGNMENT_DUE_DATE);
-    const dueDate = dueDateEl ? dueDateEl.textContent.trim().replace(/\s+/g, " ") : null;
-
-    console.log(
-      `[Headstart] List page – found: "${title}" (Due: ${dueDate})`,
+    const dueDateEl = row.querySelector(
+      CANVAS_SELECTORS.LIST_ASSIGNMENT_DUE_DATE,
     );
+    const dueDate = dueDateEl
+      ? dueDateEl.textContent.trim().replace(/\s+/g, " ")
+      : null;
+
+    log.debug(`List page – found: "${title}" (Due: ${dueDate})`);
 
     const payload = {
       courseId,
