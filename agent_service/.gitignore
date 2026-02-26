@@ -1,6 +1,6 @@
 .venv
 .env
-
+.venv/
 # Python cache files
 __pycache__/
 *.py[cod]
@@ -22,3 +22,6 @@ htmlcov/
 # OS files
 .DS_Store
 Thumbs.db
+# Test extraction outputs
+canvas_extraction.md
+pdf_extracted_text.txt

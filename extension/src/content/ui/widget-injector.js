@@ -12,17 +12,31 @@
  */
 
 import { CANVAS_SELECTORS, WIDGET } from "../../shared/constants.js";
+import { createLogger } from "../../shared/logger.js";
+import { marked } from "marked";
+import { animate, spring } from "motion";
+
+const log = createLogger("Widget");
+
+// Configure marked for safe rendering
+marked.setOptions({ breaks: true, gfm: true });
 
 const SIDEBAR_ID = "headstart-sidebar";
 const TOGGLE_ID = "headstart-toggle-btn";
 const OUTPUT_ID = "headstart-output";
 
-// If the backend never responds, stop the loader and show a message.
-const GUIDE_TIMEOUT_MS = 30000;
-
 export function injectWidget(assignmentData) {
-  if (document.getElementById(SIDEBAR_ID)) return;
+  if (document.getElementById(SIDEBAR_ID)) {
+    log.debug("Widget already injected – skipping.");
+    return;
+  }
 
+  log.info(
+    "Injecting widget | isList:",
+    !!assignmentData.listAssignments,
+    "| title:",
+    assignmentData.title ?? "(list)",
+  );
   injectToggle();
   injectSidebar(assignmentData);
 
@@ -41,12 +55,21 @@ function injectToggle() {
   btn.title = "Toggle Headstart AI";
 
   btn.onclick = () => {
-    const sidebar = document.getElementById(SIDEBAR_ID);
-    const isOpen = sidebar.classList.contains("open");
-    toggleSidebar(!isOpen);
+    toggleSidebar(!sidebarOpen);
   };
 
   document.body.appendChild(btn);
+
+  // Bounce-in animation
+  try {
+    animate(
+      btn,
+      { opacity: [0, 1], transform: ["translateX(60px)", "translateX(0)"] },
+      { easing: spring(0.3, 0.3) },
+    );
+  } catch (e) {
+    log.warn("Toggle animate error:", e?.message || e);
+  }
 }
 
 // ──────────────────────────────────────────────
@@ -62,14 +85,14 @@ function injectSidebar(data) {
 
   let chatEnabled = false;
 
-  // Timeout handle for the current run (prevents infinite loader)
-  let guideTimeout = null;
+  // Extract user timezone for date formatting (IANA string from Canvas profile)
+  const userTimezone = data.userTimezone || null;
 
   let contentHtml = "";
   if (isList) {
     contentHtml = `
       <div class="headstart-sidebar__course-label">${escapeHtml(
-        data.courseName || "Course Overview"
+        data.courseName || "Course Overview",
       )}</div>
       <ul class="headstart-sidebar__list">
         ${data.listAssignments
@@ -78,30 +101,33 @@ function injectSidebar(data) {
           <li class="headstart-sidebar__item">
             <div class="headstart-sidebar__item-title">${escapeHtml(a.title)}</div>
             <div class="headstart-sidebar__item-meta">
-              ${a.dueDate ? `Due: ${escapeHtml(a.dueDate)}` : "No due date"}
+              ${a.dueDate ? `Due: ${escapeHtml(formatDateInTimezone(a.dueDate, userTimezone) || a.dueDate)}` : "No due date"}
             </div>
           </li>
-        `
+        `,
           )
           .join("")}
       </ul>
     `;
   } else {
+    const formattedDueDate = data.dueDate
+      ? formatDateInTimezone(data.dueDate, userTimezone) || data.dueDate
+      : null;
     contentHtml = `
       <div class="headstart-sidebar__course-label">${escapeHtml(
-        data.courseName || "Current Course"
+        data.courseName || "Current Course",
       )}</div>
       <div class="headstart-sidebar__item">
         <div class="headstart-sidebar__item-title">${escapeHtml(data.title)}</div>
         <div class="headstart-sidebar__item-meta">
-          ${data.dueDate ? `Due: ${escapeHtml(data.dueDate)}` : ""}
+          ${formattedDueDate ? `Due: ${escapeHtml(formattedDueDate)}` : ""}
           <br>
           ${data.pointsPossible ? `${escapeHtml(data.pointsPossible)} Points` : ""}
         </div>
       </div>
       ${
         data.rubric
-          ? `<p style="margin-top:12px; font-size:13px;">Rubric available: ${data.rubric.criteria.length} criteria</p>`
+          ? `<div class="headstart-sidebar__item-meta" style="margin-top:6px;">Rubric: ${data.rubric.criteria.length} criteria</div>`
           : ""
       }
     `;
@@ -110,14 +136,16 @@ function injectSidebar(data) {
   sidebar.innerHTML = `
     <div class="headstart-sidebar__header">
       <div class="headstart-sidebar__logo-area">
-        <span>🚀</span>
+        <span style="font-size:18px;">🚀</span>
         <span class="headstart-sidebar__title">Headstart AI</span>
       </div>
       <button class="headstart-sidebar__close">&times;</button>
     </div>
 
     <div class="headstart-sidebar__body">
-      ${contentHtml}
+      <div class="headstart-sidebar__body-content">
+        ${contentHtml}
+      </div>
       <div id="${OUTPUT_ID}" class="headstart-sidebar__output" style="display:none;"></div>
     </div>
 
@@ -132,45 +160,39 @@ function injectSidebar(data) {
     toggleSidebar(false);
 
   // Generate Guide
-  sidebar.querySelector(".headstart-sidebar__btn").onclick = () => {
+  const actionBtn = sidebar.querySelector(".headstart-sidebar__btn");
+  actionBtn.onclick = () => {
     if (isList) return;
+
+    log.info("Generate Guide clicked");
+
+    // Spring press feedback
+    try {
+      animate(
+        actionBtn,
+        { transform: ["scale(1)", "scale(0.95)", "scale(1)"] },
+        { duration: 0.2 },
+      );
+    } catch (e) {
+      log.warn("Button animate error:", e?.message || e);
+    }
 
     if (!chatEnabled) {
       enableSimpleChatUI(sidebar);
       chatEnabled = true;
     }
 
-    // Clear any prior timeout for previous runs
-    if (guideTimeout) {
-      clearTimeout(guideTimeout);
-      guideTimeout = null;
-    }
-
     // Show loading while generation runs
     showLoadingBubble(sidebar, "guide-loading");
 
-    // Timeout fallback (prevents infinite loading if response never arrives)
-    guideTimeout = setTimeout(() => {
-      hideLoadingBubble(sidebar, "guide-loading");
-      appendChatMessage(
-        sidebar,
-        "assistant",
-        "Timed out waiting for a response. Make sure the backend services are running, then try again."
-      );
-      guideTimeout = null;
-    }, GUIDE_TIMEOUT_MS);
-
     chrome.runtime.sendMessage({ type: "START_HEADSTART_RUN" }, (resp) => {
+      log.debug("START_HEADSTART_RUN ack:", resp);
       if (!resp?.ok) {
-        if (guideTimeout) {
-          clearTimeout(guideTimeout);
-          guideTimeout = null;
-        }
         hideLoadingBubble(sidebar, "guide-loading");
         appendChatMessage(
           sidebar,
           "assistant",
-          `Error starting run: ${resp?.error || "unknown"}`
+          `Error starting run: ${resp?.error || "unknown"}`,
         );
       }
     });
@@ -182,10 +204,7 @@ function injectSidebar(data) {
 
     // Explicit handling
     if (msg.type === "HEADSTART_ERROR") {
-      if (guideTimeout) {
-        clearTimeout(guideTimeout);
-        guideTimeout = null;
-      }
+      log.error("HEADSTART_ERROR received:", msg.error);
       hideLoadingBubble(sidebar, "guide-loading");
       hideLoadingBubble(sidebar, "chat-loading");
 
@@ -194,15 +213,17 @@ function injectSidebar(data) {
         chatEnabled = true;
       }
 
-      appendChatMessage(sidebar, "assistant", `Error: ${stringifySafe(msg.error || "Unknown error")}`);
+      appendChatMessage(
+        sidebar,
+        "assistant",
+        `Error: ${stringifySafe(msg.error || "Unknown error")}`,
+      );
       return;
     }
 
     if (msg.type === "HEADSTART_RESULT") {
-      if (guideTimeout) {
-        clearTimeout(guideTimeout);
-        guideTimeout = null;
-      }
+      log.info("HEADSTART_RESULT received");
+      log.debug("Result payload:", msg.result);
       hideLoadingBubble(sidebar, "guide-loading");
       hideLoadingBubble(sidebar, "chat-loading");
 
@@ -215,10 +236,11 @@ function injectSidebar(data) {
         const guideText = buildGuideText(msg.result);
         appendChatMessage(sidebar, "assistant", guideText);
       } catch (e) {
+        log.error("Error rendering HEADSTART_RESULT:", e?.message || e);
         appendChatMessage(
           sidebar,
           "assistant",
-          `Error rendering result: ${stringifySafe(e?.message || e)}`
+          `Error rendering result: ${stringifySafe(e?.message || e)}`,
         );
       }
 
@@ -229,10 +251,6 @@ function injectSidebar(data) {
 
     // Keep your generic handlers as fallback
     if (isErrorMessage(msg)) {
-      if (guideTimeout) {
-        clearTimeout(guideTimeout);
-        guideTimeout = null;
-      }
       hideLoadingBubble(sidebar, "guide-loading");
       hideLoadingBubble(sidebar, "chat-loading");
 
@@ -247,15 +265,15 @@ function injectSidebar(data) {
         chatEnabled = true;
       }
 
-      appendChatMessage(sidebar, "assistant", `Error: ${stringifySafe(errText)}`);
+      appendChatMessage(
+        sidebar,
+        "assistant",
+        `Error: ${stringifySafe(errText)}`,
+      );
       return;
     }
 
     if (isResultMessage(msg)) {
-      if (guideTimeout) {
-        clearTimeout(guideTimeout);
-        guideTimeout = null;
-      }
       hideLoadingBubble(sidebar, "guide-loading");
       hideLoadingBubble(sidebar, "chat-loading");
 
@@ -270,7 +288,7 @@ function injectSidebar(data) {
         appendChatMessage(
           sidebar,
           "assistant",
-          "Received a completion message, but no result content was found."
+          "Received a completion message, but no result content was found.",
         );
         return;
       }
@@ -294,7 +312,7 @@ function enableSimpleChatUI(sidebar) {
   const outputEl = sidebar.querySelector(`#${OUTPUT_ID}`);
   if (!outputEl) return;
 
-  outputEl.style.display = "block";
+  outputEl.style.display = "flex";
   outputEl.innerHTML = `<div id="headstart-chat-messages" class="headstart-chat-messages"></div>`;
 
   const actionArea = sidebar.querySelector(".headstart-sidebar__action-area");
@@ -305,10 +323,14 @@ function enableSimpleChatUI(sidebar) {
       <textarea
         id="headstart-chat-input"
         class="headstart-chat-input"
-        rows="2"
-        placeholder="Ask a question..."
+        rows="1"
+        placeholder="Ask a follow-up question..."
       ></textarea>
-      <button id="headstart-chat-send" class="headstart-chat-send">Send</button>
+      <button id="headstart-chat-send" class="headstart-chat-send" aria-label="Send">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2"/>
+        </svg>
+      </button>
     </div>
   `;
 
@@ -355,9 +377,27 @@ function appendChatMessage(sidebar, role, text) {
       ? "headstart-chat-bubble user"
       : "headstart-chat-bubble assistant";
 
-  bubble.textContent = stringifySafe(text);
+  if (role === "assistant") {
+    bubble.innerHTML = marked.parse(stringifySafe(text));
+    bubble.classList.add("headstart-markdown");
+  } else {
+    bubble.textContent = stringifySafe(text);
+  }
 
   messages.appendChild(bubble);
+
+  // Entrance animation — user slides from right, assistant from left
+  try {
+    const slideFrom =
+      role === "user" ? "translateX(20px)" : "translateX(-20px)";
+    animate(
+      bubble,
+      { opacity: [0, 1], transform: [slideFrom, "translateX(0)"] },
+      { duration: 0.3, easing: "ease-out" },
+    );
+  } catch (e) {
+    log.warn("Bubble animate error:", e?.message || e);
+  }
 
   requestAnimationFrame(() => {
     messages.scrollTop = messages.scrollHeight;
@@ -386,6 +426,17 @@ function showLoadingBubble(sidebar, id = "hs-loading") {
   `;
 
   messages.appendChild(bubble);
+
+  // Fade-in + scale animation
+  try {
+    animate(
+      bubble,
+      { opacity: [0, 1], transform: ["scale(0.8)", "scale(1)"] },
+      { duration: 0.2 },
+    );
+  } catch (e) {
+    log.warn("Loading animate error:", e?.message || e);
+  }
 
   requestAnimationFrame(() => {
     messages.scrollTop = messages.scrollHeight;
@@ -462,43 +513,59 @@ function buildGuideText(result) {
   const data = normalizeJson(result);
   const lines = [];
 
-  if (data?.tldr) {
-    lines.push("TL;DR");
+  // Description (markdown) — new format, with backward compat for tldr
+  if (data?.description) {
+    lines.push(String(data.description));
+    lines.push("");
+  } else if (data?.tldr) {
     lines.push(String(data.tldr));
     lines.push("");
   }
 
   if (Array.isArray(data?.keyRequirements) && data.keyRequirements.length) {
-    lines.push("Key requirements");
-    data.keyRequirements.forEach((x) => lines.push(`• ${x}`));
+    lines.push("### Key Requirements");
+    data.keyRequirements.forEach((x) => lines.push(`- ${x}`));
     lines.push("");
   }
 
   if (Array.isArray(data?.deliverables) && data.deliverables.length) {
-    lines.push("Deliverables");
-    data.deliverables.forEach((x) => lines.push(`• ${x}`));
+    lines.push("### Deliverables");
+    data.deliverables.forEach((x) => lines.push(`- ${x}`));
     lines.push("");
   }
 
   if (Array.isArray(data?.milestones) && data.milestones.length) {
-    lines.push("Milestones");
+    lines.push("### Milestones");
     data.milestones.forEach((m) => {
-      const duration = m?.durationMin ? `${m.durationMin} min` : "";
-      const focus = m?.focus ? String(m.focus) : "";
-      const dash = duration && focus ? " — " : "";
-      lines.push(`• ${duration}${dash}${focus}`.trim());
+      const date = m?.date ? String(m.date) : "";
+      const task = m?.task ? String(m.task) : "";
+      const sep = date && task ? " — " : "";
+      lines.push(`- **${date}**${sep}${task}`.trim());
+    });
+    lines.push("");
+  }
+
+  if (Array.isArray(data?.studyPlan) && data.studyPlan.length) {
+    lines.push("### Study Plan");
+    data.studyPlan.forEach((s) => {
+      const duration = s?.durationMin ? `${s.durationMin} min` : "";
+      const focus = s?.focus ? String(s.focus) : "";
+      const sep = duration && focus ? " — " : "";
+      lines.push(`- **${duration}**${sep}${focus}`.trim());
     });
     lines.push("");
   }
 
   if (Array.isArray(data?.risks) && data.risks.length) {
-    lines.push("Risks");
-    data.risks.forEach((x) => lines.push(`• ${x}`));
+    lines.push("### Risks");
+    data.risks.forEach((x) => lines.push(`- ${x}`));
     lines.push("");
   }
 
   if (lines.length === 0) {
-    return typeof result === "string" ? result : JSON.stringify(result, null, 2);
+    return typeof result === "string"
+      ? result
+      : JSON.stringify(result, null, 2);
   }
 
   return lines.join("\n").trim();
@@ -523,10 +590,35 @@ function normalizeJson(result) {
 // Sidebar open/close
 // ──────────────────────────────────────────────
 
+let sidebarOpen = false;
+
 function toggleSidebar(open) {
   const sidebar = document.getElementById(SIDEBAR_ID);
   if (!sidebar) return;
-  sidebar.classList.toggle("open", !!open);
+
+  const shouldOpen = !!open;
+  if (shouldOpen === sidebarOpen) return;
+  sidebarOpen = shouldOpen;
+
+  try {
+    if (shouldOpen) {
+      animate(
+        sidebar,
+        { transform: ["translateX(100%)", "translateX(0)"] },
+        { easing: spring(0.35, 0.15) },
+      );
+    } else {
+      animate(
+        sidebar,
+        { transform: ["translateX(0)", "translateX(100%)"] },
+        { duration: 0.25, easing: "ease-in" },
+      );
+    }
+  } catch (e) {
+    // Fallback: just set the transform directly
+    log.warn("Sidebar animate error:", e?.message || e);
+    sidebar.style.transform = shouldOpen ? "translateX(0)" : "translateX(100%)";
+  }
 }
 
 // ──────────────────────────────────────────────
@@ -546,5 +638,33 @@ function stringifySafe(v) {
     return JSON.stringify(v, null, 2);
   } catch {
     return String(v);
+  }
+}
+
+/**
+ * Format an ISO-8601 date string into a human-readable string in the given IANA timezone.
+ * Falls back to the browser's local timezone if no timezone is provided.
+ *
+ * @param {string|null} dateStr – ISO-8601 string or raw date text
+ * @param {string|null} timezone – IANA timezone (e.g. "America/New_York")
+ * @returns {string|null}
+ */
+function formatDateInTimezone(dateStr, timezone) {
+  if (!dateStr) return null;
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr; // Not parseable – return raw string
+    const opts = {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      timeZoneName: "short",
+    };
+    if (timezone) opts.timeZone = timezone;
+    return new Intl.DateTimeFormat("en-US", opts).format(d);
+  } catch {
+    return dateStr; // Fallback to raw string on error
   }
 }
