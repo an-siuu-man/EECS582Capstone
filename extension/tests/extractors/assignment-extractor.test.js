@@ -85,55 +85,55 @@ describe("extractAssignmentData", () => {
     document.body.innerHTML = "";
   });
 
-  test("extracts title", () => {
+  test("extracts title", async () => {
     const doc = buildAssignmentDOM({ title: "Essay on AI Ethics" });
-    const data = extractAssignmentData(doc, pageInfo);
+    const data = await extractAssignmentData(doc, pageInfo);
     expect(data.title).toBe("Essay on AI Ethics");
   });
 
-  test("extracts course name", () => {
+  test("extracts course name", async () => {
     const doc = buildAssignmentDOM({ courseName: "EECS 582" });
-    const data = extractAssignmentData(doc, pageInfo);
+    const data = await extractAssignmentData(doc, pageInfo);
     expect(data.courseName).toBe("EECS 582");
   });
 
-  test("extracts description as HTML and text", () => {
+  test("extracts description as HTML and text", async () => {
     const doc = buildAssignmentDOM({
       title: "Test",
       description: "<p>Write a <strong>500 word</strong> essay.</p>",
     });
-    const data = extractAssignmentData(doc, pageInfo);
+    const data = await extractAssignmentData(doc, pageInfo);
     expect(data.descriptionHtml).toContain("<strong>500 word</strong>");
     expect(data.descriptionText).toContain("500 word");
   });
 
-  test("extracts due date from time element", () => {
+  test("extracts due date from time element", async () => {
     const doc = buildAssignmentDOM({
       title: "Test",
       dueDate: "2026-03-15T23:59:00Z",
     });
-    const data = extractAssignmentData(doc, pageInfo);
+    const data = await extractAssignmentData(doc, pageInfo);
     expect(data.dueDate).toBe("2026-03-15T23:59:00Z");
   });
 
-  test("extracts points possible", () => {
+  test("extracts points possible", async () => {
     const doc = buildAssignmentDOM({ title: "Test", points: "100" });
-    const data = extractAssignmentData(doc, pageInfo);
+    const data = await extractAssignmentData(doc, pageInfo);
     expect(data.pointsPossible).toBe("100");
   });
 
-  test("extracts submission type", () => {
+  test("extracts submission type", async () => {
     const doc = buildAssignmentDOM({
       title: "Test",
       submissionType: "Online text entry",
     });
-    const data = extractAssignmentData(doc, pageInfo);
+    const data = await extractAssignmentData(doc, pageInfo);
     expect(data.submissionType).toBe("Online text entry");
   });
 
-  test("returns null fields when data is missing", () => {
+  test("returns null fields when data is missing", async () => {
     const doc = buildAssignmentDOM({ title: "Minimal" });
-    const data = extractAssignmentData(doc, pageInfo);
+    const data = await extractAssignmentData(doc, pageInfo);
     expect(data.title).toBe("Minimal");
     expect(data.dueDate).toBeNull();
     expect(data.pointsPossible).toBeNull();
@@ -141,16 +141,16 @@ describe("extractAssignmentData", () => {
     expect(data.rubric).toBeNull();
   });
 
-  test("includes meta information", () => {
+  test("includes meta information", async () => {
     const doc = buildAssignmentDOM({ title: "Test" });
-    const data = extractAssignmentData(doc, pageInfo);
+    const data = await extractAssignmentData(doc, pageInfo);
     expect(data.meta.courseId).toBe("101");
     expect(data.meta.assignmentId).toBe("202");
     expect(data.meta.url).toBe(pageInfo.url);
     expect(data.meta.extractedAt).toBeDefined();
   });
 
-  test("extracts rubric with criteria and ratings", () => {
+  test("extracts rubric with criteria and ratings", async () => {
     const doc = buildAssignmentDOM({
       title: "Research Paper",
       rubric: {
@@ -178,7 +178,7 @@ describe("extractAssignmentData", () => {
         ],
       },
     });
-    const data = extractAssignmentData(doc, pageInfo);
+    const data = await extractAssignmentData(doc, pageInfo);
 
     expect(data.rubric).not.toBeNull();
     expect(data.rubric.title).toBe("Paper Rubric");

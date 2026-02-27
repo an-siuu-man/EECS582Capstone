@@ -13,7 +13,7 @@
  *  - Rubric (if present)
  */
 
-import { CANVAS_SELECTORS } from "../../shared/constants.js";
+import { CANVAS_SELECTORS } from "../../shared/constants/canvas.js";
 import { extractRubric } from "./rubric-extractor.js";
 import { fetchAssignmentFromAPI } from "./canvas-api-extractor.js";
 import { createLogger } from "../../shared/logger.js";
