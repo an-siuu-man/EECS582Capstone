@@ -1,7 +1,10 @@
 /**
  * Canvas Assignment Data Extractor
  *
- * Scrapes the Canvas assignment page DOM to extract:
+ * Primary method:  Canvas REST API (same-origin, session-cookie auth)
+ * Fallback method: DOM scraping (if API fails)
+ *
+ * Extracts:
  *  - Title
  *  - Description (HTML + plain text)
  *  - Due date
@@ -12,6 +15,10 @@
 
 import { CANVAS_SELECTORS } from "../../shared/constants.js";
 import { extractRubric } from "./rubric-extractor.js";
+import { fetchAssignmentFromAPI } from "./canvas-api-extractor.js";
+import { createLogger } from "../../shared/logger.js";
+
+const log = createLogger("Extractor");
 
 /**
  * @typedef {Object} AssignmentData
@@ -23,17 +30,38 @@ import { extractRubric } from "./rubric-extractor.js";
  * @property {string|null} pointsPossible
  * @property {string|null} submissionType
  * @property {import('./rubric-extractor.js').Rubric|null} rubric
+ * @property {string|null} userTimezone  – IANA timezone (e.g. "America/New_York") from Canvas profile
  * @property {Object} meta              – courseId, assignmentId, extractedAt
  */
 
 /**
- * Extract all assignment data from the current document.
+ * Extract all assignment data, trying the Canvas REST API first
+ * and falling back to DOM scraping if the API call fails.
  *
  * @param {Document} doc – The document to query (allows testing with jsdom)
  * @param {import('../detectors/page-detector.js').PageInfo} pageInfo
- * @returns {AssignmentData}
+ * @returns {Promise<AssignmentData>}
  */
-export function extractAssignmentData(doc, pageInfo) {
+export async function extractAssignmentData(doc, pageInfo) {
+  // ── Try Canvas REST API first ────────────────────────────────
+  if (pageInfo.courseId && pageInfo.assignmentId) {
+    log.info("Attempting Canvas REST API extraction…");
+    const apiData = await fetchAssignmentFromAPI(
+      pageInfo.courseId,
+      pageInfo.assignmentId,
+    );
+
+    if (apiData) {
+      log.info("Using Canvas API data (source: canvas-api)");
+      return apiData;
+    }
+
+    log.warn("API extraction returned null – falling back to DOM scraping");
+  }
+
+  // ── Fallback: DOM scraping ───────────────────────────────────
+  log.info("Extracting assignment data from DOM…");
+
   const title = extractTitle(doc);
   const courseName = extractCourseName(doc);
   const { html: descriptionHtml, text: descriptionText } =
@@ -42,6 +70,15 @@ export function extractAssignmentData(doc, pageInfo) {
   const pointsPossible = extractPointsPossible(doc);
   const submissionType = extractSubmissionType(doc);
   const rubric = extractRubric(doc);
+
+  // Warn about any fields that couldn't be found
+  if (!title) log.warn("Could not extract title (no matching selector)");
+  if (!courseName) log.warn("Could not extract courseName");
+  if (!descriptionText) log.warn("Could not extract description");
+  if (!dueDate) log.warn("Could not extract dueDate");
+  if (!pointsPossible) log.debug("pointsPossible not found (may be ungraded)");
+  if (!submissionType) log.debug("submissionType not found");
+  if (!rubric) log.debug("No rubric found");
 
   return {
     title,
@@ -52,11 +89,13 @@ export function extractAssignmentData(doc, pageInfo) {
     pointsPossible,
     submissionType,
     rubric,
+    userTimezone: null, // Only available via API extraction
     meta: {
       courseId: pageInfo.courseId,
       assignmentId: pageInfo.assignmentId,
       url: pageInfo.url,
       extractedAt: new Date().toISOString(),
+      source: "dom-scraping",
     },
   };
 }

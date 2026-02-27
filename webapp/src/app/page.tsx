@@ -5,6 +5,7 @@ import { motion } from "framer-motion"
 import { BrainCircuit, BookOpen, Clock, Zap, CheckCircle2, ArrowRight } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { ModeToggle } from "@/components/mode-toggle"
 
 const container = {
   hidden: { opacity: 0 },
@@ -22,22 +23,49 @@ const item = {
 }
 
 export default function LandingPage() {
+  const scrollToSection = (e: React.MouseEvent<HTMLAnchorElement | HTMLButtonElement>, id: string) => {
+    e.preventDefault()
+    const element = document.getElementById(id)
+    if (element) {
+      const offset = 64 // height of the fixed navbar
+      const bodyRect = document.body.getBoundingClientRect().top
+      const elementRect = element.getBoundingClientRect().top
+      const elementPosition = elementRect - bodyRect
+      const offsetPosition = elementPosition - offset
+
+      window.scrollTo({
+        top: offsetPosition,
+        behavior: "smooth",
+      })
+    }
+  }
+
   return (
     <div className="flex flex-col min-h-screen">
       {/* Navbar */}
       <header className="h-16 flex items-center backdrop-blur-sm bg-background/80 fixed w-full z-50 border-b border-brand-gold/20 px-4 md:px-6">
         <div className="container mx-auto flex items-center">
-          <Link className="flex items-center justify-center gap-2" href="#">
+          <Link className="flex items-center justify-center gap-2" href="#" onClick={(e) => {
+            e.preventDefault()
+            window.scrollTo({ top: 0, behavior: "smooth" })
+          }}>
             <BrainCircuit className="h-6 w-6 text-brand-blue" />
             <span className="text-xl font-heading font-bold tracking-wide text-foreground">Headstart AI</span>
           </Link>
           <nav className="ml-auto flex gap-2 sm:gap-6">
-            <Link className="hidden md:flex text-sm font-medium hover:text-brand-blue transition-colors items-center" href="#features">
+            <a 
+              className="hidden md:flex text-sm font-medium hover:text-brand-blue transition-colors items-center cursor-pointer" 
+              onClick={(e) => scrollToSection(e, "features")}
+            >
               Features
-            </Link>
-            <Link className="hidden md:flex text-sm font-medium hover:text-brand-blue transition-colors items-center" href="#how-it-works">
+            </a>
+            <a 
+              className="hidden md:flex text-sm font-medium hover:text-brand-blue transition-colors items-center cursor-pointer" 
+              onClick={(e) => scrollToSection(e, "how-it-works")}
+            >
               How it Works
-            </Link>
+            </a>
+            <ModeToggle />
             <Link href="/login">
               <Button variant="ghost" size="sm">Log In</Button>
             </Link>
@@ -75,9 +103,14 @@ export default function LandingPage() {
                   <ArrowRight className="ml-2 h-5 w-5" />
                 </Button>
               </Link>
-              <Link href="#features">
-                 <Button variant="outline" size="lg" className="h-12 px-8 text-lg border-brand-blue/20 text-brand-blue hover:bg-brand-blue/5">Learn More</Button>
-              </Link>
+              <Button 
+                variant="outline" 
+                size="lg" 
+                className="h-12 px-8 text-lg border-brand-blue/20 text-brand-blue hover:bg-brand-blue/5"
+                onClick={(e) => scrollToSection(e, "features")}
+              >
+                Learn More
+              </Button>
             </motion.div>
           </motion.div>
         </section>
