@@ -18,6 +18,10 @@ Errors/Exceptions:
 - ImportError if orchestrator module cannot be loaded.
 """
 
-from .orchestrators.headstart_orchestrator import run_headstart_agent
+def run_headstart_agent(payload: dict, pdf_text: str = "") -> dict:
+    """Backward-compatible lazy adapter around the orchestrator implementation."""
+    from .orchestrators.headstart_orchestrator import run_headstart_agent as _impl
+
+    return _impl(payload, pdf_text)
 
 __all__ = ["run_headstart_agent"]
