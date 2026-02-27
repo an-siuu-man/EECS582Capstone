@@ -12,7 +12,7 @@
  *       .criterion_points  →  max points for criterion
  */
 
-import { CANVAS_SELECTORS } from "../../shared/constants.js";
+import { CANVAS_SELECTORS } from "../../shared/constants/canvas.js";
 
 /**
  * @typedef {Object} RubricRating

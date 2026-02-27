@@ -1,7 +1,22 @@
 /**
- * Headstart AI – Popup Script
- *
- * Displays recently detected assignments from chrome.storage.local.
+ * Artifact: extension/src/popup/popup.js
+ * Purpose: Renders the extension popup list of detected assignments from local storage.
+ * Author: Ansuman 'Sharma'
+ * Created: 2026-02-27
+ * Revised:
+ * - 2026-02-27: Standardized popup module prologue for maintainability documentation. (Ansuman 'Sharma')
+ * Preconditions:
+ * - Popup HTML contains an element with id `assignment-list`.
+ * - `chrome.storage.local` is accessible from popup context.
+ * Inputs:
+ * - Acceptable: Stored assignment records using `assignment::` key namespace.
+ * - Unacceptable: Missing/invalid storage records with non-object values or malformed date strings.
+ * Postconditions:
+ * - Popup list is populated with assignment summaries or an empty-state message.
+ * Returns:
+ * - No return value; an async IIFE performs DOM mutations.
+ * Errors/Exceptions:
+ * - Runtime storage/DOM errors propagate to console if thrown by browser APIs.
  */
 
 (async function () {

@@ -1,4 +1,4 @@
-import { CANVAS_URL_PATTERNS } from "../../shared/constants.js";
+import { CANVAS_URL_PATTERNS } from "../../shared/constants/canvas.js";
 import { createLogger } from "../../shared/logger.js";
 
 const log = createLogger("Detector");
