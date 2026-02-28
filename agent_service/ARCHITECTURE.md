@@ -9,7 +9,7 @@ The FastAPI agent service receives normalized assignment payloads (plus optional
 - `app/main.py`: FastAPI entrypoint, route registration, legacy compatibility endpoints.
 - `app/api/v1/routes/runs.py`: Request handler wrapper for run execution.
 - `app/services/run_agent_service.py`: Request-level workflow orchestration.
-- `app/services/pdf_text_service.py`: PDF decode and text extraction.
+- `app/services/pdf_text_service.py`: Page-aware PDF extraction (native-first classification, selective OCR fallback, normalization).
 - `app/orchestrators/headstart_orchestrator.py`: LLM prompting, structured parsing, retry/fallback logic.
 - `app/clients/llm_client.py`: LLM client factory (NVIDIA via LangChain).
 - `app/schemas/*`: Pydantic request/response and shared models.
@@ -56,16 +56,34 @@ Both run endpoints share the same internal handler path through `handle_run_agen
 1. Web app forwards request to `POST /run-agent` (or v1 route).
 2. Route calls `run_agent_workflow()` from `services/run_agent_service.py`.
 3. Service logs request metadata and calls `extract_all_pdf_text()`.
-4. PDF service:
-5. Decodes `pdf_files[*].base64_data`.
-6. Uses PyMuPDF (`fitz`) to extract per-page text.
-7. Merges extracted text with legacy `pdf_text`.
-8. Writes combined debug dump to `agent_service/pdf_extracted_text.txt`.
-9. Service calls `run_headstart_agent(payload, pdf_text)`.
-10. Orchestrator builds NVIDIA chat client and attempts:
-11. Structured output mode (`with_structured_output(RunAgentResponse)`).
-12. Fallback prompt-based generation with JSON repair/parsing heuristics.
+4. PDF service decodes `pdf_files[*].base64_data` (raw base64 and data-URL payloads).
+5. For each page, PDF service extracts native text via PyMuPDF (`fitz`).
+6. A page-quality heuristic classifies each page as either:
+   - `native` (good text layer)
+   - `ocr` candidate (empty/short/symbol-heavy native extraction)
+7. Only classified pages use OCR fallback:
+   - render page image via PyMuPDF
+   - preprocess with Pillow (grayscale + autocontrast)
+   - OCR via pytesseract
+8. Extracted text is normalized for LLM readability:
+   - de-hyphenate line-break splits
+   - unwrap hard line breaks into paragraphs
+   - normalize whitespace
+   - remove repeated headers/footers across pages
+9. Service assembles output with stable separators:
+   - `--- File: <filename> ---`
+   - `--- Page N (native|ocr) ---`
+10. Service merges extracted text with legacy `pdf_text`, writes debug dump to `agent_service/pdf_extracted_text.txt`, then calls `run_headstart_agent(payload, pdf_text)`.
+11. Orchestrator builds NVIDIA chat client and attempts structured output mode (`with_structured_output(RunAgentResponse)`).
+12. If needed, orchestrator falls back to prompt-based generation with JSON repair/parsing heuristics.
 13. Service returns structured dictionary back through route layer.
+
+## PDF Extraction Strategy
+
+- Native text extraction is the default path for highest fidelity when a text layer exists.
+- OCR is selective and page-scoped to reduce latency/cost compared to OCR-ing whole documents.
+- Normalization preserves structure where useful (headings, bullets, table-like rows) while removing common PDF artifacts that confuse LLM prompts.
+- Output remains a plain string contract so downstream LLM orchestration interfaces are unchanged.
 
 ## LLM Orchestration Strategy
 
@@ -77,11 +95,13 @@ Both run endpoints share the same internal handler path through `handle_run_agen
 
 - Required env var: `NVIDIA_API_KEY`.
 - Core dependencies: FastAPI, Pydantic, LangChain, NVIDIA LangChain endpoint client.
-- Optional but recommended: PyMuPDF for PDF extraction.
+- Required for PDF extraction: PyMuPDF (`pymupdf`).
+- Optional OCR dependencies: `pytesseract`, `pillow`, and a system Tesseract binary available on `PATH`.
 
 ## Failure Behavior
 
 - Missing `NVIDIA_API_KEY` raises runtime error.
 - PDF decode/extract failures are logged and skipped per file.
+- OCR dependency/runtime failures are logged and only affect OCR-candidate pages; pipeline continues with native extraction output when available.
 - Route wrapper catches unhandled workflow exceptions and returns HTTP 500.
 - Parsing failures after all retries raise explicit runtime errors with diagnostics.

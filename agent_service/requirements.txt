@@ -5,3 +5,5 @@ pydantic
 langchain
 langchain-nvidia-ai-endpoints
 pymupdf
+pillow
+pytesseract
