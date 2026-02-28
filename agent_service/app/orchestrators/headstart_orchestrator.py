@@ -36,7 +36,7 @@ from ..schemas.responses import RunAgentResponse
 
 logger = get_logger("headstart.agent")
 
-MODEL_NAME = "nvidia/nemotron-nano-12b-v2-vl"
+MODEL_NAME = "nvidia/llama-3.3-nemotron-super-49b-v1.5"
 TEMPERATURE = 0.3
 MAX_OUTPUT_TOKENS = 8192
 MAX_RETRIES = 2
@@ -46,6 +46,9 @@ You are an academic assistant helping a student understand a Canvas assignment.
 
 Your job is to analyze the assignment details and any attached file contents,
 then produce a structured guide that helps the student succeed.
+
+If visual emphasis context is provided (highlighted / underlined / style-emphasized text),
+treat high-significance markers as likely important requirements and reflect that priority.
 
 Guidelines for the "description" field:
 - Write in **markdown** format (use headings, bold, bullet lists).
@@ -75,6 +78,9 @@ Assignment payload:
 {payload}
 
 Student's timezone: {timezone}
+
+Visual emphasis context (high/medium significance markers from PDF annotations/styles):
+{visual_signals}
 
 Attached file contents (may be empty):
 {pdf_text}\
@@ -153,7 +159,43 @@ def _try_parse_json(text: str) -> dict:
         raise ValueError(f"Could not parse model output as JSON. {e}. Snippet: {snippet}")
 
 
-def _try_structured_output(llm, payload_str: str, pdf_text_str: str, timezone_str: str) -> Optional[dict]:
+def _format_visual_signals_for_prompt(visual_signals: Optional[list[dict]]) -> str:
+    if not visual_signals:
+        return "(none)"
+
+    ranked = sorted(
+        [s for s in visual_signals if isinstance(s, dict)],
+        key=lambda s: (
+            -float(s.get("score", 0.0)),
+            int(s.get("page", 0)),
+            str(s.get("text", "")),
+        ),
+    )
+    lines = []
+    for sig in ranked[:40]:
+        text = str(sig.get("text", "")).strip()
+        if not text:
+            continue
+        lines.append(
+            "- [{file} p{page}] {text} | signals={types} | significance={siglvl} | score={score}".format(
+                file=sig.get("file", "?"),
+                page=sig.get("page", "?"),
+                text=text,
+                types=",".join(sig.get("signal_types", [])) or "unknown",
+                siglvl=sig.get("significance", "unknown"),
+                score=sig.get("score", "?"),
+            )
+        )
+    return "\n".join(lines) if lines else "(none)"
+
+
+def _try_structured_output(
+    llm,
+    payload_str: str,
+    pdf_text_str: str,
+    timezone_str: str,
+    visual_signals_str: str,
+) -> Optional[dict]:
     """
     Use LangChain's with_structured_output() to get schema-conforming output.
     Returns None if this approach fails (so caller can fall back).
@@ -168,6 +210,7 @@ def _try_structured_output(llm, payload_str: str, pdf_text_str: str, timezone_st
                     payload=payload_str,
                     pdf_text=pdf_text_str,
                     timezone=timezone_str,
+                    visual_signals=visual_signals_str,
                 )
             ),
         ]
@@ -193,7 +236,13 @@ def _try_structured_output(llm, payload_str: str, pdf_text_str: str, timezone_st
         return None
 
 
-def _try_prompt_based(llm, payload_str: str, pdf_text_str: str, timezone_str: str) -> dict:
+def _try_prompt_based(
+    llm,
+    payload_str: str,
+    pdf_text_str: str,
+    timezone_str: str,
+    visual_signals_str: str,
+) -> dict:
     """
     Fallback: use a prompt that asks the model to return JSON directly,
     then parse it with repair heuristics.
@@ -222,6 +271,9 @@ Assignment payload:
 
 Student's timezone: {timezone}
 
+Visual emphasis context:
+{visual_signals}
+
 Attached file contents:
 {pdf_text}""",
             ),
@@ -241,6 +293,7 @@ Attached file contents:
                     "payload": payload_str,
                     "pdf_text": pdf_text_str,
                     "timezone": timezone_str,
+                    "visual_signals": visual_signals_str,
                 }
             )
 
@@ -263,7 +316,7 @@ Attached file contents:
     raise RuntimeError(f"All {MAX_RETRIES} attempts failed. Last error: {last_error}")
 
 
-def run_headstart_agent(payload: dict, pdf_text: str = "") -> dict:
+def run_headstart_agent(payload: dict, pdf_text: str = "", visual_signals: Optional[list[dict]] = None) -> dict:
     """
     Run the Headstart AI agent using Nvidia Nemotron via LangChain.
 
@@ -291,10 +344,23 @@ def run_headstart_agent(payload: dict, pdf_text: str = "") -> dict:
     payload_str = json.dumps(payload, ensure_ascii=False)
     pdf_text_str = pdf_text or "(no attached files)"
     timezone_str = payload.get("userTimezone") or "Not specified (use due date as-is)"
+    visual_signals_str = _format_visual_signals_for_prompt(visual_signals)
 
-    result = _try_structured_output(llm, payload_str, pdf_text_str, timezone_str)
+    result = _try_structured_output(
+        llm,
+        payload_str,
+        pdf_text_str,
+        timezone_str,
+        visual_signals_str,
+    )
     if result is not None:
         return result
 
     logger.info("Falling back to prompt-based generation")
-    return _try_prompt_based(llm, payload_str, pdf_text_str, timezone_str)
+    return _try_prompt_based(
+        llm,
+        payload_str,
+        pdf_text_str,
+        timezone_str,
+        visual_signals_str,
+    )

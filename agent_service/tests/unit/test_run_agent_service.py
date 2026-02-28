@@ -25,10 +25,11 @@ class TestRunAgentService(unittest.TestCase):
 
     def test_run_agent_workflow_orchestrates_extraction_and_agent_call(self):
         req = self._build_request()
+        visual_signals = [{"file": "spec.pdf", "page": 1, "text": "Q1", "signal_types": ["highlight"]}]
 
         with patch(
-            "app.services.run_agent_service.extract_all_pdf_text",
-            return_value="pdf context",
+            "app.services.run_agent_service.extract_pdf_context",
+            return_value=("pdf context", visual_signals),
         ) as mock_extract, patch(
             "app.services.run_agent_service._run_headstart_agent",
             return_value=SAMPLE_RESULT,
@@ -37,14 +38,14 @@ class TestRunAgentService(unittest.TestCase):
 
         self.assertEqual(result, SAMPLE_RESULT)
         mock_extract.assert_called_once_with(req)
-        mock_agent.assert_called_once_with(req.payload, "pdf context")
+        mock_agent.assert_called_once_with(req.payload, "pdf context", visual_signals=visual_signals)
 
     def test_run_agent_workflow_handles_empty_pdf_text(self):
         req = self._build_request()
 
         with patch(
-            "app.services.run_agent_service.extract_all_pdf_text",
-            return_value="",
+            "app.services.run_agent_service.extract_pdf_context",
+            return_value=("", []),
         ) as mock_extract, patch(
             "app.services.run_agent_service._run_headstart_agent",
             return_value=SAMPLE_RESULT,
@@ -53,7 +54,7 @@ class TestRunAgentService(unittest.TestCase):
 
         self.assertEqual(result, SAMPLE_RESULT)
         mock_extract.assert_called_once_with(req)
-        mock_agent.assert_called_once_with(req.payload, "")
+        mock_agent.assert_called_once_with(req.payload, "", visual_signals=[])
 
 
 if __name__ == "__main__":

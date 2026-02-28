@@ -20,16 +20,16 @@ Errors/Exceptions:
 
 from ..core.logging import get_logger
 from ..schemas.requests import RunAgentRequest
-from .pdf_text_service import extract_all_pdf_text
+from .pdf_text_service import extract_pdf_context
 
 logger = get_logger("headstart.main")
 
 
-def _run_headstart_agent(payload: dict, pdf_text: str) -> dict:
+def _run_headstart_agent(payload: dict, pdf_text: str, visual_signals: list[dict]) -> dict:
     """Lazy import to avoid loading LLM dependencies at module import time."""
     from ..orchestrators.headstart_orchestrator import run_headstart_agent
 
-    return run_headstart_agent(payload, pdf_text)
+    return run_headstart_agent(payload, pdf_text, visual_signals=visual_signals)
 
 
 def run_agent_workflow(req: RunAgentRequest, route_path: str) -> dict:
@@ -47,11 +47,13 @@ def run_agent_workflow(req: RunAgentRequest, route_path: str) -> dict:
         num_pdf_files,
     )
 
-    pdf_text = extract_all_pdf_text(req)
+    pdf_text, visual_signals = extract_pdf_context(req)
     if pdf_text:
         logger.info("Combined PDF text: %d chars", len(pdf_text))
+    if visual_signals:
+        logger.info("Extracted visual signals: %d", len(visual_signals))
 
-    result = _run_headstart_agent(req.payload, pdf_text)
+    result = _run_headstart_agent(req.payload, pdf_text, visual_signals=visual_signals)
     logger.info(
         "Agent completed | keys=%s",
         list(result.keys()) if isinstance(result, dict) else type(result).__name__,

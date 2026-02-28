@@ -55,8 +55,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         "| pageTitle:",
         message.pageTitle,
       );
-      handleStartHeadstartRun(sender.tab, message.pageTitle);
-      sendResponse({ ok: true });
+      // Keep the message channel open until the long-running workflow completes.
+      // This helps prevent MV3 service worker suspension before result dispatch.
+      (async () => {
+        try {
+          await handleStartHeadstartRun(sender.tab, message.pageTitle);
+          sendResponse({ ok: true });
+        } catch (e) {
+          const err = String(e?.message || e);
+          log.error("START_HEADSTART_RUN failed:", err);
+          sendResponse({ ok: false, error: err });
+        }
+      })();
       break;
 
     default:
