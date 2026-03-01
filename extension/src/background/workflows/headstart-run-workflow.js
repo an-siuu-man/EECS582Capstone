@@ -1,8 +1,8 @@
 /**
- * Workflow for START_HEADSTART_RUN message: build payload, call backend, return result.
+ * Workflow for START_HEADSTART_RUN message: build payload and create a dashboard chat session.
  */
 
-import { ingestAssignment, runAgent } from "../../clients/webapp-client.js";
+import { createChatSession } from "../../clients/webapp-client.js";
 import { MESSAGE_TYPES } from "../../shared/contracts/messages.js";
 import { createLogger } from "../../shared/logger.js";
 import { getAssignmentRecord } from "../../storage/assignment-store.js";
@@ -14,6 +14,11 @@ import {
 const log = createLogger("SW.Run");
 
 const BACKEND_BASE_URL = "http://localhost:3000";
+
+function buildChatUrl(sessionId) {
+  const base = BACKEND_BASE_URL.replace(/\/$/, "");
+  return `${base}/dashboard/chat?session=${encodeURIComponent(sessionId)}`;
+}
 
 function sendToTabWithLogging(tabId, message, logContext) {
   if (!tabId) {
@@ -31,7 +36,7 @@ function sendToTabWithLogging(tabId, message, logContext) {
 }
 
 /**
- * Build and send a normalized payload for the currently-open assignment tab.
+ * Build payload from the currently-open assignment tab and hand off to webapp chat UI.
  */
 export async function handleStartHeadstartRun(tab, pageTitle) {
   const ids = getCanvasIdsFromUrl(tab?.url || "");
@@ -76,41 +81,26 @@ export async function handleStartHeadstartRun(tab, pageTitle) {
   }
 
   try {
-    log.info(`POST ${BACKEND_BASE_URL}/api/ingest-assignment`);
-    const ingestStart = Date.now();
-    const ingestResponse = await ingestAssignment(payload, BACKEND_BASE_URL);
-    log.info(
-      `/api/ingest-assignment → 200 (${Date.now() - ingestStart}ms)`,
-    );
-    log.debug("/api/ingest-assignment response:", ingestResponse);
+    log.info(`POST ${BACKEND_BASE_URL}/api/chat-session`);
+    const sessionStart = Date.now();
+    const session = await createChatSession({ payload }, BACKEND_BASE_URL);
+    log.info(`/api/chat-session -> 200 (${Date.now() - sessionStart}ms)`);
+    log.debug("/api/chat-session response:", session);
 
-    const pdfFiles = (payload.pdfAttachments || []).map((a) => ({
-      filename: a.filename,
-      base64_data: a.base64Data,
-    }));
+    if (!session?.session_id) {
+      throw new Error("chat-session response missing session_id");
+    }
 
-    const { pdfAttachments: _discarded, ...payloadWithoutPdfs } = payload;
-    log.info(`Sending ${pdfFiles.length} PDF file(s) to agent service`);
-    log.info(
-      `POST ${BACKEND_BASE_URL}/api/run-agent | assignment_uuid=${ingestResponse.assignment_uuid}`,
-    );
-
-    const runStart = Date.now();
-    const ai = await runAgent(
-      {
-        assignmentUuid: ingestResponse.assignment_uuid,
-        payload: payloadWithoutPdfs,
-        pdfFiles,
-      },
-      BACKEND_BASE_URL,
-    );
-
-    log.info(`/api/run-agent → 200 (${Date.now() - runStart}ms)`);
-    log.info("Sending HEADSTART_RESULT to tab:", tab?.id);
+    const redirectUrl = buildChatUrl(session.session_id);
+    log.info("Created dashboard chat URL:", redirectUrl);
 
     sendToTabWithLogging(tab?.id, {
       type: MESSAGE_TYPES.HEADSTART_RESULT,
-      result: ai,
+      result: {
+        status: "chat_session_created",
+        sessionId: session.session_id,
+        redirectUrl,
+      },
     }, "HEADSTART_RESULT");
   } catch (e) {
     log.error("handleStartHeadstartRun failed:", e?.message || e);

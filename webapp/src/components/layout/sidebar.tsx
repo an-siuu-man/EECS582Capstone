@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Home, FileText, Settings, BookOpen, LogOut, BrainCircuit } from "lucide-react"
+import { Home, FileText, Settings, BookOpen, LogOut, BrainCircuit, MessageSquare } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 const links = [
   { href: "/dashboard", label: "Dashboard", icon: Home },
   { href: "/dashboard/assignments", label: "Assignments", icon: FileText },
+  { href: "/dashboard/chat", label: "Chat", icon: MessageSquare },
   { href: "/dashboard/resources", label: "Resources", icon: BookOpen },
   { href: "/dashboard/settings", label: "Settings", icon: Settings },
 ]
