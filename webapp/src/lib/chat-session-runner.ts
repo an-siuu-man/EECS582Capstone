@@ -1,9 +1,12 @@
 import {
+  appendChatSessionGuideDelta,
   markChatSessionCompleted,
   markChatSessionFailed,
   markChatSessionRunning,
+  type ChatSessionStage,
   updateChatSessionProgress,
 } from "@/lib/chat-session-store"
+import { type SseMessage, readSseStream } from "@/lib/sse"
 
 type PdfAttachment = {
   filename?: string
@@ -14,16 +17,121 @@ type AssignmentPayload = Record<string, unknown> & {
   pdfAttachments?: PdfAttachment[]
 }
 
+type AgentRunEventName =
+  | "run.started"
+  | "run.stage"
+  | "run.delta"
+  | "run.completed"
+  | "run.error"
+  | "run.heartbeat"
+
 function toErrorMessage(err: unknown) {
   if (err instanceof Error) return err.message
   return String(err)
+}
+
+function parseJsonObject(raw: string) {
+  const parsed = JSON.parse(raw) as unknown
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Expected SSE data to be a JSON object.")
+  }
+  return parsed as Record<string, unknown>
+}
+
+function parseAgentRunEvent(message: SseMessage) {
+  const eventName = message.event as AgentRunEventName
+  if (!eventName.startsWith("run.")) {
+    return null
+  }
+
+  const data = message.data ? parseJsonObject(message.data) : {}
+  return {
+    event: eventName,
+    data,
+  }
+}
+
+function toStage(value: unknown): ChatSessionStage {
+  if (typeof value !== "string") return "calling_agent"
+  if (
+    value === "queued" ||
+    value === "preparing_payload" ||
+    value === "extracting_pdf" ||
+    value === "calling_agent" ||
+    value === "streaming_output" ||
+    value === "validating_output" ||
+    value === "parsing_response" ||
+    value === "completed" ||
+    value === "failed"
+  ) {
+    return value
+  }
+  return "calling_agent"
+}
+
+function toPercent(value: unknown, fallback: number) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.max(0, Math.min(100, Math.round(parsed)))
+}
+
+async function openAgentStream(agentUrl: string, body: string) {
+  const primaryUrl = `${agentUrl}/api/v1/runs/stream`
+  const primary = await fetch(primaryUrl, {
+    method: "POST",
+    headers: {
+      Accept: "text/event-stream",
+      "Content-Type": "application/json",
+    },
+    body,
+  })
+
+  if (primary.status !== 404) {
+    return primary
+  }
+
+  return fetch(`${agentUrl}/run-agent/stream`, {
+    method: "POST",
+    headers: {
+      Accept: "text/event-stream",
+      "Content-Type": "application/json",
+    },
+    body,
+  })
 }
 
 async function runAgentForSession(
   sessionId: string,
   payload: AssignmentPayload
 ) {
-  let callProgressTimer: ReturnType<typeof setInterval> | null = null
+  let flushTimer: ReturnType<typeof setInterval> | null = null
+  let bufferedDelta = ""
+  let bufferedProgress: number | null = null
+  let bufferedStatusMessage: string | null = null
+
+  const flushBufferedDelta = () => {
+    if (!bufferedDelta && bufferedProgress === null && !bufferedStatusMessage) {
+      return
+    }
+
+    if (bufferedDelta) {
+      appendChatSessionGuideDelta(sessionId, bufferedDelta, {
+        progressPercent: bufferedProgress ?? undefined,
+        statusMessage: bufferedStatusMessage ?? undefined,
+      })
+    } else {
+      updateChatSessionProgress(sessionId, {
+        stage: "streaming_output",
+        progressPercent: bufferedProgress ?? 66,
+        statusMessage: bufferedStatusMessage ?? "Generating guide",
+      })
+    }
+
+    bufferedDelta = ""
+    bufferedProgress = null
+    bufferedStatusMessage = null
+  }
+
   try {
     markChatSessionRunning(sessionId)
 
@@ -50,72 +158,96 @@ async function runAgentForSession(
 
     updateChatSessionProgress(sessionId, {
       stage: "calling_agent",
-      progressPercent: 60,
-      statusMessage: "Calling agent service",
+      progressPercent: 56,
+      statusMessage: "Connecting to agent stream",
     })
 
-    // While the LLM call is in flight, advance progress gradually to avoid a long static bar.
-    // This is still an estimate (true step-level accuracy needs streaming/progress events).
-    const callStartedAt = Date.now()
-    let lastProgress = 60
-    callProgressTimer = setInterval(() => {
-      const elapsedSec = (Date.now() - callStartedAt) / 1000
-      const estimated = 60 + Math.round(34 * (1 - Math.exp(-elapsedSec / 18)))
-      const next = Math.min(94, Math.max(lastProgress, estimated))
-      if (next > lastProgress) {
-        lastProgress = next
-        updateChatSessionProgress(sessionId, {
-          stage: "calling_agent",
-          progressPercent: next,
-          statusMessage: "Calling agent service",
-        })
-      }
-    }, 1500)
-
-    const runResponse = await fetch(`${agentUrl}/run-agent`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    const requestBody = JSON.stringify({
+      assignment_uuid: assignmentUuid,
+      payload: {
+        ...payloadWithoutPdfs,
         assignment_uuid: assignmentUuid,
-        payload: {
-          ...payloadWithoutPdfs,
-          assignment_uuid: assignmentUuid,
-        },
-        pdf_text: "",
-        pdf_files: pdfFiles,
-      }),
+      },
+      pdf_text: "",
+      pdf_files: pdfFiles,
     })
 
-    const rawText = await runResponse.text()
-    if (!runResponse.ok) {
-      throw new Error(`Agent service error (${runResponse.status}): ${rawText}`)
+    const streamResponse = await openAgentStream(agentUrl, requestBody)
+    if (!streamResponse.ok) {
+      const rawText = await streamResponse.text()
+      throw new Error(`Agent service stream error (${streamResponse.status}): ${rawText}`)
     }
 
-    if (callProgressTimer) {
-      clearInterval(callProgressTimer)
-      callProgressTimer = null
+    if (!streamResponse.body) {
+      throw new Error("Agent stream response has no body")
     }
 
-    updateChatSessionProgress(sessionId, {
-      stage: "parsing_response",
-      progressPercent: 96,
-      statusMessage: "Formatting guide output",
-    })
+    flushTimer = setInterval(flushBufferedDelta, 80)
+    let hasCompleted = false
 
-    let parsedResult: unknown = rawText
-    try {
-      parsedResult = JSON.parse(rawText)
-    } catch {
-      parsedResult = rawText
+    for await (const message of readSseStream(streamResponse.body)) {
+      const parsedEvent = parseAgentRunEvent(message)
+      if (!parsedEvent) continue
+
+      const { event, data } = parsedEvent
+
+      if (event === "run.started" || event === "run.stage") {
+        flushBufferedDelta()
+        updateChatSessionProgress(sessionId, {
+          stage: toStage(data.stage),
+          progressPercent: toPercent(data.progress_percent, 56),
+          statusMessage:
+            typeof data.status_message === "string"
+              ? data.status_message
+              : "Generating guide",
+        })
+        continue
+      }
+
+      if (event === "run.delta") {
+        if (typeof data.delta === "string" && data.delta.length > 0) {
+          bufferedDelta += data.delta
+        }
+        if (data.progress_percent !== undefined) {
+          bufferedProgress = toPercent(data.progress_percent, bufferedProgress ?? 66)
+        }
+        if (typeof data.status_message === "string" && data.status_message.trim()) {
+          bufferedStatusMessage = data.status_message
+        }
+        continue
+      }
+
+      if (event === "run.completed") {
+        flushBufferedDelta()
+        const guideMarkdown =
+          typeof data.guideMarkdown === "string" ? data.guideMarkdown : ""
+        markChatSessionCompleted(sessionId, {
+          guideMarkdown,
+        })
+        hasCompleted = true
+        break
+      }
+
+      if (event === "run.error") {
+        flushBufferedDelta()
+        const errorMessage =
+          typeof data.message === "string" && data.message.trim()
+            ? data.message
+            : "Guide generation failed"
+        throw new Error(errorMessage)
+      }
     }
 
-    markChatSessionCompleted(sessionId, parsedResult)
+    flushBufferedDelta()
+    if (!hasCompleted) {
+      throw new Error("Agent stream ended before completion.")
+    }
   } catch (err) {
-    if (callProgressTimer) {
-      clearInterval(callProgressTimer)
-      callProgressTimer = null
-    }
     markChatSessionFailed(sessionId, toErrorMessage(err))
+  } finally {
+    if (flushTimer) {
+      clearInterval(flushTimer)
+    }
   }
 }
 

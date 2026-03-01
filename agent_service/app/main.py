@@ -22,7 +22,10 @@ from fastapi import FastAPI
 
 from .api.v1.router import api_v1_router
 from .api.v1.routes.health import get_health_status
-from .api.v1.routes.runs import handle_run_agent_request
+from .api.v1.routes.runs import (
+    handle_run_agent_request,
+    handle_run_agent_stream_request,
+)
 from .core.config import settings
 from .core.logging import configure_logging
 from .schemas.requests import RunAgentRequest
@@ -41,3 +44,8 @@ def health_legacy():
 @app.post("/run-agent")
 def run_agent_legacy(req: RunAgentRequest):
     return handle_run_agent_request(req, route_path="/run-agent")
+
+
+@app.post("/run-agent/stream")
+def run_agent_stream_legacy(req: RunAgentRequest):
+    return handle_run_agent_stream_request(req, route_path="/run-agent/stream")

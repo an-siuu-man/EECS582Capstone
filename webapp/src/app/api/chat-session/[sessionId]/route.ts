@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { getChatSession } from "@/lib/chat-session-store"
+import { getChatSession, serializeChatSession } from "@/lib/chat-session-store"
 
 export const runtime = "nodejs"
 
@@ -85,17 +85,5 @@ export async function GET(
     }
   }
 
-  return NextResponse.json({
-    ok: true,
-    session_id: session.id,
-    created_at: session.createdAt,
-    updated_at: session.updatedAt,
-    status: session.status,
-    stage: session.stage,
-    progress_percent: session.progressPercent,
-    status_message: session.statusMessage,
-    result: session.result ?? null,
-    error: session.error ?? null,
-    payload: session.payload,
-  })
+  return NextResponse.json(serializeChatSession(session))
 }
