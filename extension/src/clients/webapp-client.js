@@ -24,6 +24,22 @@ export async function ingestAssignment(payload, baseUrl) {
   return res.json();
 }
 
+export async function createChatSession({ payload }, baseUrl) {
+  const backendBaseUrl = toBaseUrl(baseUrl);
+  const res = await fetch(`${backendBaseUrl}/api/chat-session`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ payload }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`chat-session failed (${res.status}): ${errText}`);
+  }
+
+  return res.json();
+}
+
 export async function runAgent({ assignmentUuid, payload, pdfFiles }, baseUrl) {
   const backendBaseUrl = toBaseUrl(baseUrl);
 

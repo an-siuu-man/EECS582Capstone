@@ -8,12 +8,7 @@ from app.main import run_agent_legacy
 from app.schemas.requests import RunAgentRequest
 
 SAMPLE_RESULT = {
-    "description": "summary",
-    "keyRequirements": ["req"],
-    "deliverables": ["del"],
-    "milestones": [{"date": "Feb 20", "task": "Draft"}],
-    "studyPlan": [{"durationMin": 30, "focus": "Read prompt"}],
-    "risks": ["Late start"],
+    "guideMarkdown": "## Assignment Overview\n\nWrite a concise draft.",
 }
 
 

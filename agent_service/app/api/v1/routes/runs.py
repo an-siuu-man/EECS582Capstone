@@ -11,9 +11,9 @@ Inputs:
 - Acceptable: POST body containing payload and optional pdf_text/pdf_files.
 - Unacceptable: Invalid schema payloads or malformed JSON bodies.
 Postconditions:
-- Executes run-agent workflow and returns model-generated structured guide response.
+- Executes run-agent workflow and returns a markdown guide response.
 Returns:
-- Dictionary containing description, keyRequirements, deliverables, milestones, studyPlan, and risks.
+- Dictionary containing `guideMarkdown`.
 Errors/Exceptions:
 - Raises HTTPException(500) when workflow/orchestrator execution fails.
 """

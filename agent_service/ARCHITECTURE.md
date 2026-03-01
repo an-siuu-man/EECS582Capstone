@@ -44,12 +44,7 @@ Both run endpoints share the same internal handler path through `handle_run_agen
 
 `RunAgentResponse`:
 
-- `description: string`
-- `keyRequirements: string[]`
-- `deliverables: string[]`
-- `milestones: { date, task }[]`
-- `studyPlan: { durationMin, focus }[]`
-- `risks: string[]`
+- `guideMarkdown: string` (single markdown body with all guide sections/headings in-text)
 
 ## End-to-End Call Flow
 

@@ -1,40 +1,37 @@
 /**
  * Artifact: extension/src/content/injectors/widget-injector.js
- * Purpose: Injects and manages the Headstart sidebar UI, action controls, and result rendering inside Canvas pages.
+ * Purpose: Injects and manages the Headstart sidebar UI and webapp handoff actions inside Canvas pages.
  * Author: Ansuman Sharma
  * Created: 2026-02-27
  * Revised:
- * - 2026-02-27: Moved widget injector into content/injectors and aligned message usage with shared contracts. (Ansuman 'Sharma')
+ * - 2026-03-01: Replaced in-extension chat flow with webapp chat handoff and status messaging. (Codex)
  * Preconditions:
  * - Executed on Canvas pages with DOM access and content-script runtime messaging available.
  * Inputs:
  * - Acceptable: Assignment payload objects for single-assignment or assignment-list rendering.
  * - Unacceptable: Null/undefined payloads or payloads missing required view fields (title/course/list data).
  * Postconditions:
- * - Sidebar/toggle UI is mounted once, user actions are wired, and result/error messages update chat output.
+ * - Sidebar/toggle UI is mounted once, user actions are wired, and status/error updates are shown.
  * Returns:
  * - `injectWidget` returns void after DOM and listener side effects are applied.
  * Errors/Exceptions:
- * - UI/rendering and animation errors are caught and logged; runtime errors are surfaced through chat error messages.
+ * - UI/rendering and animation errors are caught and logged; runtime errors are surfaced as status text.
  */
 
 import { MESSAGE_TYPES } from "../../shared/contracts/messages.js";
 import { createLogger } from "../../shared/logger.js";
-import { marked } from "marked";
 import { animate, spring } from "motion";
 
 const log = createLogger("Widget");
 
-// Configure marked for safe rendering
-marked.setOptions({ breaks: true, gfm: true });
-
 const SIDEBAR_ID = "headstart-sidebar";
 const TOGGLE_ID = "headstart-toggle-btn";
 const OUTPUT_ID = "headstart-output";
+const WEBAPP_BASE_URL = "http://localhost:3000";
 
 export function injectWidget(assignmentData) {
   if (document.getElementById(SIDEBAR_ID)) {
-    log.debug("Widget already injected – skipping.");
+    log.debug("Widget already injected - skipping.");
     return;
   }
 
@@ -50,9 +47,9 @@ export function injectWidget(assignmentData) {
   setTimeout(() => toggleSidebar(true), 500);
 }
 
-// ──────────────────────────────────────────────
+// ------------------------------------------------------------
 // Toggle button
-// ──────────────────────────────────────────────
+// ------------------------------------------------------------
 
 function injectToggle() {
   const btn = document.createElement("button");
@@ -67,7 +64,6 @@ function injectToggle() {
 
   document.body.appendChild(btn);
 
-  // Bounce-in animation
   try {
     animate(
       btn,
@@ -79,9 +75,9 @@ function injectToggle() {
   }
 }
 
-// ──────────────────────────────────────────────
+// ------------------------------------------------------------
 // Sidebar
-// ──────────────────────────────────────────────
+// ------------------------------------------------------------
 
 function injectSidebar(data) {
   const sidebar = document.createElement("div");
@@ -89,10 +85,6 @@ function injectSidebar(data) {
   sidebar.className = "headstart-sidebar";
 
   const isList = !!data.listAssignments;
-
-  let chatEnabled = false;
-
-  // Extract user timezone for date formatting (IANA string from Canvas profile)
   const userTimezone = data.userTimezone || null;
 
   let contentHtml = "";
@@ -158,7 +150,7 @@ function injectSidebar(data) {
 
     <div class="headstart-sidebar__action-area">
       <button class="headstart-sidebar__btn">
-        ${isList ? "View Full Dashboard" : "Generate Guide"}
+        ${isList ? "Open Dashboard" : "Generate Guide"}
       </button>
     </div>
   `;
@@ -166,14 +158,36 @@ function injectSidebar(data) {
   sidebar.querySelector(".headstart-sidebar__close").onclick = () =>
     toggleSidebar(false);
 
-  // Generate Guide
+  const outputEl = sidebar.querySelector(`#${OUTPUT_ID}`);
+  const setStatus = (text, tone = "info") => {
+    if (!outputEl) return;
+    outputEl.style.display = "block";
+    outputEl.style.whiteSpace = "pre-wrap";
+    outputEl.style.fontSize = "14px";
+    outputEl.style.lineHeight = "1.45";
+    outputEl.style.padding = "12px";
+    outputEl.style.borderRadius = "12px";
+
+    if (tone === "error") {
+      outputEl.style.background = "#fef2f2";
+      outputEl.style.color = "#991b1b";
+      outputEl.style.border = "1px solid #fecaca";
+    } else if (tone === "success") {
+      outputEl.style.background = "#f0fdf4";
+      outputEl.style.color = "#166534";
+      outputEl.style.border = "1px solid #bbf7d0";
+    } else {
+      outputEl.style.background = "#eff6ff";
+      outputEl.style.color = "#1e3a8a";
+      outputEl.style.border = "1px solid #bfdbfe";
+    }
+
+    outputEl.textContent = stringifySafe(text);
+  };
+
   const actionBtn = sidebar.querySelector(".headstart-sidebar__btn");
+  let dashboardUrl = null;
   actionBtn.onclick = () => {
-    if (isList) return;
-
-    log.info("Generate Guide clicked");
-
-    // Spring press feedback
     try {
       animate(
         actionBtn,
@@ -184,49 +198,45 @@ function injectSidebar(data) {
       log.warn("Button animate error:", e?.message || e);
     }
 
-    if (!chatEnabled) {
-      enableSimpleChatUI(sidebar);
-      chatEnabled = true;
+    if (isList) {
+      window.open(`${WEBAPP_BASE_URL}/dashboard`, "_blank", "noopener,noreferrer");
+      setStatus("Opened dashboard in a new tab.", "success");
+      return;
     }
 
-    // Show loading while generation runs
-    showLoadingBubble(sidebar, "guide-loading");
+    if (dashboardUrl) {
+      window.open(dashboardUrl, "_blank", "noopener,noreferrer");
+      setStatus("Opened dashboard guide view in a new tab.", "success");
+      return;
+    }
 
-    chrome.runtime.sendMessage(
-      { type: MESSAGE_TYPES.START_HEADSTART_RUN },
-      (resp) => {
+    actionBtn.disabled = true;
+    actionBtn.textContent = "Generating...";
+    setStatus("Guide generation started. This can take up to a minute.", "info");
+
+    chrome.runtime.sendMessage({ type: MESSAGE_TYPES.START_HEADSTART_RUN }, (resp) => {
       log.debug("START_HEADSTART_RUN ack:", resp);
       if (!resp?.ok) {
-        hideLoadingBubble(sidebar, "guide-loading");
-        appendChatMessage(
-          sidebar,
-          "assistant",
-          `Error starting run: ${resp?.error || "unknown"}`,
+        actionBtn.disabled = false;
+        actionBtn.textContent = "Generate Guide";
+        setStatus(
+          `Unable to start guide generation: ${resp?.error || "unknown error"}`,
+          "error",
         );
       }
-      },
-    );
+    });
   };
 
-  // Message listener
   chrome.runtime.onMessage.addListener((msg) => {
     if (!msg) return;
 
-    // Explicit handling
     if (msg.type === MESSAGE_TYPES.HEADSTART_ERROR) {
       log.error("HEADSTART_ERROR received:", msg.error);
-      hideLoadingBubble(sidebar, "guide-loading");
-      hideLoadingBubble(sidebar, "chat-loading");
-
-      if (!chatEnabled) {
-        enableSimpleChatUI(sidebar);
-        chatEnabled = true;
-      }
-
-      appendChatMessage(
-        sidebar,
-        "assistant",
-        `Error: ${stringifySafe(msg.error || "Unknown error")}`,
+      actionBtn.disabled = false;
+      actionBtn.textContent = "Generate Guide";
+      setStatus(
+        `Unable to start guide generation: ${stringifySafe(msg.error || "Unknown error")}`,
+        "error",
       );
       return;
     }
@@ -234,371 +244,29 @@ function injectSidebar(data) {
     if (msg.type === MESSAGE_TYPES.HEADSTART_RESULT) {
       log.info("HEADSTART_RESULT received");
       log.debug("Result payload:", msg.result);
-      hideLoadingBubble(sidebar, "guide-loading");
-      hideLoadingBubble(sidebar, "chat-loading");
+      actionBtn.disabled = false;
 
-      if (!chatEnabled) {
-        enableSimpleChatUI(sidebar);
-        chatEnabled = true;
-      }
-
-      try {
-        const guideText = buildGuideText(msg.result);
-        appendChatMessage(sidebar, "assistant", guideText);
-      } catch (e) {
-        log.error("Error rendering HEADSTART_RESULT:", e?.message || e);
-        appendChatMessage(
-          sidebar,
-          "assistant",
-          `Error rendering result: ${stringifySafe(e?.message || e)}`,
+      const redirectUrl = msg.result?.redirectUrl || msg.redirectUrl;
+      if (redirectUrl) {
+        dashboardUrl = redirectUrl;
+        actionBtn.textContent = "View Guide in Dashboard";
+        setStatus(
+          "Guide generation is running in the background. Click \"View Guide in Dashboard\" to follow progress.",
+          "success",
         );
+      } else {
+        actionBtn.textContent = "Generate Guide";
+        setStatus("Guide request started, but dashboard link was missing.", "error");
       }
-
-      const input = sidebar.querySelector("#headstart-chat-input");
-      if (input) input.focus();
-      return;
-    }
-
-    // Keep your generic handlers as fallback
-    if (isErrorMessage(msg)) {
-      hideLoadingBubble(sidebar, "guide-loading");
-      hideLoadingBubble(sidebar, "chat-loading");
-
-      const errText =
-        msg.error ||
-        msg.message ||
-        msg.detail ||
-        (typeof msg === "string" ? msg : "Unknown error");
-
-      if (!chatEnabled) {
-        enableSimpleChatUI(sidebar);
-        chatEnabled = true;
-      }
-
-      appendChatMessage(
-        sidebar,
-        "assistant",
-        `Error: ${stringifySafe(errText)}`,
-      );
-      return;
-    }
-
-    if (isResultMessage(msg)) {
-      hideLoadingBubble(sidebar, "guide-loading");
-      hideLoadingBubble(sidebar, "chat-loading");
-
-      if (!chatEnabled) {
-        enableSimpleChatUI(sidebar);
-        chatEnabled = true;
-      }
-
-      const rawResult = extractResult(msg);
-
-      if (!rawResult) {
-        appendChatMessage(
-          sidebar,
-          "assistant",
-          "Received a completion message, but no result content was found.",
-        );
-        return;
-      }
-
-      appendChatMessage(sidebar, "assistant", buildGuideText(rawResult));
-
-      const input = sidebar.querySelector("#headstart-chat-input");
-      if (input) input.focus();
-      return;
     }
   });
 
   document.body.appendChild(sidebar);
 }
 
-// ──────────────────────────────────────────────
-// Chat UI
-// ──────────────────────────────────────────────
-
-function enableSimpleChatUI(sidebar) {
-  const outputEl = sidebar.querySelector(`#${OUTPUT_ID}`);
-  if (!outputEl) return;
-
-  outputEl.style.display = "flex";
-  outputEl.innerHTML = `<div id="headstart-chat-messages" class="headstart-chat-messages"></div>`;
-
-  const actionArea = sidebar.querySelector(".headstart-sidebar__action-area");
-  if (!actionArea) return;
-
-  actionArea.innerHTML = `
-    <div class="headstart-chat-composer">
-      <textarea
-        id="headstart-chat-input"
-        class="headstart-chat-input"
-        rows="1"
-        placeholder="Ask a follow-up question..."
-      ></textarea>
-      <button id="headstart-chat-send" class="headstart-chat-send" aria-label="Send">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2"/>
-        </svg>
-      </button>
-    </div>
-  `;
-
-  const input = sidebar.querySelector("#headstart-chat-input");
-  const sendBtn = sidebar.querySelector("#headstart-chat-send");
-
-  const send = () => handleVisualSend(sidebar);
-  sendBtn.addEventListener("click", send);
-
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      send();
-    }
-  });
-}
-
-function handleVisualSend(sidebar) {
-  const input = sidebar.querySelector("#headstart-chat-input");
-  if (!input) return;
-
-  const text = (input.value || "").trim();
-  if (!text) return;
-
-  input.value = "";
-  appendChatMessage(sidebar, "user", text);
-
-  // Visual "thinking" animation
-  showLoadingBubble(sidebar, "chat-loading");
-
-  setTimeout(() => {
-    hideLoadingBubble(sidebar, "chat-loading");
-    appendChatMessage(sidebar, "assistant", "Not wired yet");
-  }, 350);
-}
-
-function appendChatMessage(sidebar, role, text) {
-  const messages = sidebar.querySelector("#headstart-chat-messages");
-  if (!messages) return;
-
-  const bubble = document.createElement("div");
-  bubble.className =
-    role === "user"
-      ? "headstart-chat-bubble user"
-      : "headstart-chat-bubble assistant";
-
-  if (role === "assistant") {
-    bubble.innerHTML = marked.parse(stringifySafe(text));
-    bubble.classList.add("headstart-markdown");
-  } else {
-    bubble.textContent = stringifySafe(text);
-  }
-
-  messages.appendChild(bubble);
-
-  // Entrance animation — user slides from right, assistant from left
-  try {
-    const slideFrom =
-      role === "user" ? "translateX(20px)" : "translateX(-20px)";
-    animate(
-      bubble,
-      { opacity: [0, 1], transform: [slideFrom, "translateX(0)"] },
-      { duration: 0.3, easing: "ease-out" },
-    );
-  } catch (e) {
-    log.warn("Bubble animate error:", e?.message || e);
-  }
-
-  requestAnimationFrame(() => {
-    messages.scrollTop = messages.scrollHeight;
-  });
-}
-
-// ──────────────────────────────────────────────
-// Loading
-// ──────────────────────────────────────────────
-
-function showLoadingBubble(sidebar, id = "hs-loading") {
-  const messages = sidebar.querySelector("#headstart-chat-messages");
-  if (!messages) return;
-
-  if (messages.querySelector(`[data-loading="${id}"]`)) return;
-
-  const bubble = document.createElement("div");
-  bubble.className = "headstart-chat-bubble assistant headstart-loading-bubble";
-  bubble.setAttribute("data-loading", id);
-
-  // Dots
-  bubble.innerHTML = `
-    <span class="hs-dots" aria-label="Loading">
-      <span></span><span></span><span></span>
-    </span>
-  `;
-
-  messages.appendChild(bubble);
-
-  // Fade-in + scale animation
-  try {
-    animate(
-      bubble,
-      { opacity: [0, 1], transform: ["scale(0.8)", "scale(1)"] },
-      { duration: 0.2 },
-    );
-  } catch (e) {
-    log.warn("Loading animate error:", e?.message || e);
-  }
-
-  requestAnimationFrame(() => {
-    messages.scrollTop = messages.scrollHeight;
-  });
-}
-
-function hideLoadingBubble(sidebar, id = "hs-loading") {
-  const messages = sidebar.querySelector("#headstart-chat-messages");
-  if (!messages) return;
-
-  const el = messages.querySelector(`[data-loading="${id}"]`);
-  if (el) el.remove();
-}
-
-// ──────────────────────────────────────────────
-// Result detection + extraction
-// ──────────────────────────────────────────────
-
-function isResultMessage(msg) {
-  const t = String(msg.type || "").toUpperCase();
-
-  if (
-    t === "HEADSTART_RESULT" ||
-    t === "HEADSTART_DONE" ||
-    t === "RUN_AGENT_RESULT" ||
-    t === "RUN_AGENT_DONE" ||
-    t === "AGENT_RESULT" ||
-    t === "RESULT"
-  ) {
-    return true;
-  }
-
-  return (
-    msg.result != null ||
-    msg.data != null ||
-    msg.output != null ||
-    msg.response != null ||
-    (msg.payload && (msg.payload.result != null || msg.payload.output != null))
-  );
-}
-
-function isErrorMessage(msg) {
-  const t = String(msg.type || "").toUpperCase();
-  return (
-    t === "HEADSTART_ERROR" ||
-    t === "RUN_AGENT_ERROR" ||
-    t === "AGENT_ERROR" ||
-    t === "ERROR" ||
-    msg.error != null
-  );
-}
-
-function extractResult(msg) {
-  if (msg.result != null) return msg.result;
-  if (msg.data != null) return msg.data;
-  if (msg.output != null) return msg.output;
-  if (msg.response != null) return msg.response;
-
-  if (msg.payload) {
-    if (msg.payload.result != null) return msg.payload.result;
-    if (msg.payload.output != null) return msg.payload.output;
-    if (msg.payload.data != null) return msg.payload.data;
-    if (msg.payload.response != null) return msg.payload.response;
-  }
-
-  return null;
-}
-
-// ──────────────────────────────────────────────
-// Guide formatting
-// ──────────────────────────────────────────────
-
-function buildGuideText(result) {
-  const data = normalizeJson(result);
-  const lines = [];
-
-  // Description (markdown) — new format, with backward compat for tldr
-  if (data?.description) {
-    lines.push(String(data.description));
-    lines.push("");
-  } else if (data?.tldr) {
-    lines.push(String(data.tldr));
-    lines.push("");
-  }
-
-  if (Array.isArray(data?.keyRequirements) && data.keyRequirements.length) {
-    lines.push("### Key Requirements");
-    data.keyRequirements.forEach((x) => lines.push(`- ${x}`));
-    lines.push("");
-  }
-
-  if (Array.isArray(data?.deliverables) && data.deliverables.length) {
-    lines.push("### Deliverables");
-    data.deliverables.forEach((x) => lines.push(`- ${x}`));
-    lines.push("");
-  }
-
-  if (Array.isArray(data?.milestones) && data.milestones.length) {
-    lines.push("### Milestones");
-    data.milestones.forEach((m) => {
-      const date = m?.date ? String(m.date) : "";
-      const task = m?.task ? String(m.task) : "";
-      const sep = date && task ? " — " : "";
-      lines.push(`- **${date}**${sep}${task}`.trim());
-    });
-    lines.push("");
-  }
-
-  if (Array.isArray(data?.studyPlan) && data.studyPlan.length) {
-    lines.push("### Study Plan");
-    data.studyPlan.forEach((s) => {
-      const duration = s?.durationMin ? `${s.durationMin} min` : "";
-      const focus = s?.focus ? String(s.focus) : "";
-      const sep = duration && focus ? " — " : "";
-      lines.push(`- **${duration}**${sep}${focus}`.trim());
-    });
-    lines.push("");
-  }
-
-  if (Array.isArray(data?.risks) && data.risks.length) {
-    lines.push("### Risks");
-    data.risks.forEach((x) => lines.push(`- ${x}`));
-    lines.push("");
-  }
-
-  if (lines.length === 0) {
-    return typeof result === "string"
-      ? result
-      : JSON.stringify(result, null, 2);
-  }
-
-  return lines.join("\n").trim();
-}
-
-function normalizeJson(result) {
-  if (result == null) return result;
-  if (typeof result === "object") return result;
-
-  if (typeof result === "string") {
-    try {
-      return JSON.parse(result);
-    } catch {
-      return { tldr: result };
-    }
-  }
-
-  return result;
-}
-
-// ──────────────────────────────────────────────
+// ------------------------------------------------------------
 // Sidebar open/close
-// ──────────────────────────────────────────────
+// ------------------------------------------------------------
 
 let sidebarOpen = false;
 
@@ -625,15 +293,14 @@ function toggleSidebar(open) {
       );
     }
   } catch (e) {
-    // Fallback: just set the transform directly
     log.warn("Sidebar animate error:", e?.message || e);
     sidebar.style.transform = shouldOpen ? "translateX(0)" : "translateX(100%)";
   }
 }
 
-// ──────────────────────────────────────────────
+// ------------------------------------------------------------
 // Helpers
-// ──────────────────────────────────────────────
+// ------------------------------------------------------------
 
 function escapeHtml(str) {
   if (!str) return "";
@@ -651,19 +318,11 @@ function stringifySafe(v) {
   }
 }
 
-/**
- * Format an ISO-8601 date string into a human-readable string in the given IANA timezone.
- * Falls back to the browser's local timezone if no timezone is provided.
- *
- * @param {string|null} dateStr – ISO-8601 string or raw date text
- * @param {string|null} timezone – IANA timezone (e.g. "America/New_York")
- * @returns {string|null}
- */
 function formatDateInTimezone(dateStr, timezone) {
   if (!dateStr) return null;
   try {
     const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return dateStr; // Not parseable – return raw string
+    if (isNaN(d.getTime())) return dateStr;
     const opts = {
       weekday: "short",
       month: "short",
@@ -675,6 +334,6 @@ function formatDateInTimezone(dateStr, timezone) {
     if (timezone) opts.timeZone = timezone;
     return new Intl.DateTimeFormat("en-US", opts).format(d);
   } catch {
-    return dateStr; // Fallback to raw string on error
+    return dateStr;
   }
 }
