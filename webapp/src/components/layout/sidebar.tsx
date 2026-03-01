@@ -2,7 +2,8 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Home, FileText, Settings, BookOpen, LogOut, BrainCircuit, MessageSquare } from "lucide-react"
+import { useState } from "react"
+import { Home, FileText, BookOpen, LogOut, BrainCircuit, MessageSquare, PanelLeftClose, PanelLeftOpen } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -12,22 +13,60 @@ const links = [
   { href: "/dashboard/assignments", label: "Assignments", icon: FileText },
   { href: "/dashboard/chat", label: "Chat", icon: MessageSquare },
   { href: "/dashboard/resources", label: "Resources", icon: BookOpen },
-  { href: "/dashboard/settings", label: "Settings", icon: Settings },
 ]
 
 interface SidebarContentProps {
-  className?: string;
-  onClick?: () => void;
+  className?: string
+  onClick?: () => void
+  collapsed?: boolean
+  onToggleCollapse?: () => void
+  showCollapseToggle?: boolean
 }
 
-export function SidebarContent({ className, onClick }: SidebarContentProps) {
+export function SidebarContent({
+  className,
+  onClick,
+  collapsed = false,
+  onToggleCollapse,
+  showCollapseToggle = false,
+}: SidebarContentProps) {
   const pathname = usePathname()
   
   return (
     <div className={cn("flex flex-col h-full", className)}>
-      <div className="p-6 flex items-center gap-2 border-b">
-        <BrainCircuit className="h-6 w-6 text-primary" />
-        <span className="text-xl font-heading font-bold tracking-tight">Headstart AI</span>
+      <div
+        className={cn(
+          "flex items-center gap-2 border-b p-4 transition-all duration-300",
+          collapsed ? "justify-between px-3" : "justify-between px-4"
+        )}
+      >
+        <div
+          aria-hidden={collapsed}
+          className={cn(
+            "flex items-center gap-2 overflow-hidden transition-[max-width,opacity,transform] duration-300 ease-out",
+            collapsed ? "max-w-0 -translate-x-1 opacity-0" : "max-w-[210px] translate-x-0 opacity-100"
+          )}
+        >
+          <BrainCircuit className="h-6 w-6 shrink-0 text-primary" />
+          <span className="whitespace-nowrap text-xl font-heading font-bold tracking-tight">
+            Headstart AI
+          </span>
+        </div>
+        {showCollapseToggle ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={onToggleCollapse}
+            className={cn(
+              "shrink-0 transition-all duration-300",
+              "h-8 w-8"
+            )}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {collapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+          </Button>
+        ) : null}
       </div>
       
       <div className="flex-1 py-6 px-3">
@@ -40,14 +79,22 @@ export function SidebarContent({ className, onClick }: SidebarContentProps) {
                 href={link.href}
                 onClick={onClick}
                 className={cn(
-                  "flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors",
+                  "flex items-center rounded-md py-2 text-sm font-medium transition-all duration-300",
+                  collapsed ? "justify-center px-2" : "gap-3 px-3",
                   isActive
                     ? "bg-primary text-primary-foreground"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground"
                 )}
               >
                 <link.icon className="h-4 w-4" />
-                <span>{link.label}</span>
+                <span
+                  className={cn(
+                    "overflow-hidden whitespace-nowrap transition-[max-width,opacity,transform] duration-300 ease-out",
+                    collapsed ? "max-w-0 -translate-x-1 opacity-0" : "max-w-[140px] translate-x-0 opacity-100"
+                  )}
+                >
+                  {link.label}
+                </span>
               </Link>
             )
           })}
@@ -55,9 +102,22 @@ export function SidebarContent({ className, onClick }: SidebarContentProps) {
       </div>
 
       <div className="p-4 border-t">
-         <Button variant="ghost" className="w-full justify-start gap-2 text-muted-foreground hover:text-destructive">
+         <Button
+            variant="ghost"
+            className={cn(
+              "w-full text-muted-foreground hover:text-destructive transition-all duration-300",
+              collapsed ? "justify-center px-2" : "justify-start gap-2"
+            )}
+         >
             <LogOut className="h-4 w-4" />
-            <span>Log out</span>
+            <span
+              className={cn(
+                "overflow-hidden whitespace-nowrap transition-[max-width,opacity,transform] duration-300 ease-out",
+                collapsed ? "max-w-0 -translate-x-1 opacity-0" : "max-w-[100px] translate-x-0 opacity-100"
+              )}
+            >
+              Log out
+            </span>
          </Button>
       </div>
     </div>
@@ -65,9 +125,20 @@ export function SidebarContent({ className, onClick }: SidebarContentProps) {
 }
 
 export function Sidebar() {
+  const [collapsed, setCollapsed] = useState(false)
+
   return (
-    <aside className="hidden md:flex w-64 border-r bg-card h-screen sticky top-0 flex-col">
-       <SidebarContent />
+    <aside
+      className={cn(
+        "sticky top-0 hidden h-screen flex-col border-r bg-card transition-[width] duration-300 ease-out md:flex",
+        collapsed ? "w-20" : "w-64"
+      )}
+    >
+       <SidebarContent
+         collapsed={collapsed}
+         onToggleCollapse={() => setCollapsed((value) => !value)}
+         showCollapseToggle
+       />
     </aside>
   )
 }

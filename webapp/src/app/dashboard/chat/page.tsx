@@ -74,6 +74,19 @@ type LocalChatMessage = {
 const EASE_OUT = [0.22, 1, 0.36, 1] as const
 const THINK_OPEN_TAG = "<think>"
 const THINK_CLOSE_TAG = "</think>"
+const STATUS_BADGE_TONES = [
+  "border-emerald-400/60 bg-emerald-500/15 text-emerald-800 dark:text-emerald-200",
+  "border-sky-400/60 bg-sky-500/15 text-sky-800 dark:text-sky-200",
+  "border-violet-400/60 bg-violet-500/15 text-violet-800 dark:text-violet-200",
+  "border-rose-400/60 bg-rose-500/15 text-rose-800 dark:text-rose-200",
+] as const
+const STAGE_BADGE_TONES = [
+  "border-cyan-400/60 bg-cyan-500/15 text-cyan-800 dark:text-cyan-200",
+  "border-amber-400/60 bg-amber-500/15 text-amber-800 dark:text-amber-200",
+  "border-fuchsia-400/60 bg-fuchsia-500/15 text-fuchsia-800 dark:text-fuchsia-200",
+  "border-lime-400/60 bg-lime-500/15 text-lime-800 dark:text-lime-200",
+  "border-indigo-400/60 bg-indigo-500/15 text-indigo-800 dark:text-indigo-200",
+] as const
 
 function normalizeResult(result: unknown) {
   if (result == null) return result
@@ -192,6 +205,8 @@ function DashboardChatPageContent() {
   const [localMessages, setLocalMessages] = useState<LocalChatMessage[]>([])
   const [showProgressPanel, setShowProgressPanel] = useState(false)
   const [displayProgress, setDisplayProgress] = useState(0)
+  const [statusToneIndex, setStatusToneIndex] = useState(0)
+  const [stageToneIndex, setStageToneIndex] = useState(0)
   const threadContainerRef = useRef<HTMLDivElement | null>(null)
   const latestSessionRef = useRef<ChatSessionResponse | null>(null)
   const previousGuideLengthRef = useRef(0)
@@ -220,6 +235,15 @@ function DashboardChatPageContent() {
 
     const applySession = (nextSession: ChatSessionResponse) => {
       if (isDisposed) return
+      const previousSession = latestSessionRef.current
+
+      if (previousSession?.status && previousSession.status !== nextSession.status) {
+        setStatusToneIndex((prev) => (prev + 1) % STATUS_BADGE_TONES.length)
+      }
+      if (previousSession?.stage && previousSession.stage !== nextSession.stage) {
+        setStageToneIndex((prev) => (prev + 1) % STAGE_BADGE_TONES.length)
+      }
+
       latestSessionRef.current = nextSession
       setSession(nextSession)
       setIsPolling(false)
@@ -291,6 +315,12 @@ function DashboardChatPageContent() {
     sessionId && session?.session_id === sessionId ? session : null
   const payload = effectiveSession?.payload
   const attachmentCount = payload?.pdfAttachments?.length ?? 0
+  const attachmentNames = (payload?.pdfAttachments ?? [])
+    .map((item, index) => {
+      const name = typeof item?.filename === "string" ? item.filename.trim() : ""
+      return name || `attachment-${index + 1}.pdf`
+    })
+    .filter((name) => name.length > 0)
   const createdAtText = effectiveSession?.created_at
     ? format(new Date(effectiveSession.created_at), "MMM d, yyyy h:mm a")
     : null
@@ -434,7 +464,22 @@ function DashboardChatPageContent() {
                   <p className="font-medium">{payload.courseName || String(payload.courseId || "-")}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Badge variant="outline">Attachments: {attachmentCount}</Badge>
+                  <div className="group/attachments relative inline-flex">
+                    <Badge variant="outline">Attachments: {attachmentCount}</Badge>
+                    <div className="pointer-events-none absolute left-0 top-[calc(100%+0.5rem)] z-30 w-max min-w-56 max-w-72 translate-y-1 rounded-lg border border-border/70 bg-popover/95 p-2 text-xs text-popover-foreground opacity-0 shadow-lg backdrop-blur transition-all duration-150 ease-out group-hover/attachments:translate-y-0 group-hover/attachments:opacity-100">
+                      {attachmentNames.length > 0 ? (
+                        <ul className="space-y-1">
+                          {attachmentNames.map((name, index) => (
+                            <li key={`${name}-${index}`} className="truncate text-muted-foreground">
+                              {name}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-muted-foreground">No attachments provided.</p>
+                      )}
+                    </div>
+                  </div>
                   {payload.rubric?.criteria?.length ? (
                     <Badge variant="outline">Rubric: {payload.rubric.criteria.length}</Badge>
                   ) : null}
@@ -457,11 +502,43 @@ function DashboardChatPageContent() {
                   <>
                     <div>
                       <p className="text-muted-foreground">Status</p>
-                      <p className="font-medium capitalize">{effectiveSession.status}</p>
+                      <AnimatePresence mode="wait" initial={false}>
+                        <motion.div
+                          key={`status-${effectiveSession.status}-${statusToneIndex}`}
+                          initial={reduceMotion ? false : { opacity: 0, y: 6, scale: 0.95 }}
+                          animate={reduceMotion ? undefined : { opacity: 1, y: 0, scale: 1 }}
+                          exit={reduceMotion ? undefined : { opacity: 0, y: -6, scale: 0.95 }}
+                          transition={reduceMotion ? undefined : { duration: 0.24, ease: EASE_OUT }}
+                          className="mt-1 inline-flex"
+                        >
+                          <Badge
+                            variant="outline"
+                            className={`px-2.5 py-1 text-xs font-semibold capitalize transition-colors duration-500 ${STATUS_BADGE_TONES[statusToneIndex]}`}
+                          >
+                            {effectiveSession.status}
+                          </Badge>
+                        </motion.div>
+                      </AnimatePresence>
                     </div>
                     <div>
                       <p className="text-muted-foreground">Stage</p>
-                      <p className="font-medium">{stageLabel(effectiveSession.stage)}</p>
+                      <AnimatePresence mode="wait" initial={false}>
+                        <motion.div
+                          key={`stage-${effectiveSession.stage}-${stageToneIndex}`}
+                          initial={reduceMotion ? false : { opacity: 0, y: 6, scale: 0.95 }}
+                          animate={reduceMotion ? undefined : { opacity: 1, y: 0, scale: 1 }}
+                          exit={reduceMotion ? undefined : { opacity: 0, y: -6, scale: 0.95 }}
+                          transition={reduceMotion ? undefined : { duration: 0.24, ease: EASE_OUT }}
+                          className="mt-1 inline-flex"
+                        >
+                          <Badge
+                            variant="outline"
+                            className={`px-2.5 py-1 text-xs font-semibold transition-colors duration-500 ${STAGE_BADGE_TONES[stageToneIndex]}`}
+                          >
+                            {stageLabel(effectiveSession.stage)}
+                          </Badge>
+                        </motion.div>
+                      </AnimatePresence>
                     </div>
                     {isPolling ? (
                       <p className="text-xs text-muted-foreground">Reconnecting stream...</p>
@@ -533,13 +610,15 @@ function DashboardChatPageContent() {
                       {reduceMotion ? (
                         <span className="font-medium text-muted-foreground">Thinking</span>
                       ) : (
-                        <motion.span
-                          className="inline-block bg-[linear-gradient(110deg,rgba(100,116,139,0.35)_0%,rgba(248,250,252,0.98)_45%,rgba(100,116,139,0.35)_90%)] bg-[length:220%_100%] bg-clip-text font-semibold text-transparent"
-                          animate={{ backgroundPosition: ["200% 0%", "-20% 0%"] }}
-                          transition={{ duration: 1.2, repeat: Infinity, ease: "linear" }}
-                        >
-                          Thinking
-                        </motion.span>
+                        <span className="inline-grid font-medium text-muted-foreground">
+                          <span className="[grid-area:1/1]">Thinking</span>
+                          <span
+                            aria-hidden="true"
+                            className="thinking-shine-overlay pointer-events-none [grid-area:1/1]"
+                          >
+                            Thinking
+                          </span>
+                        </span>
                       )}
                     </motion.div>
                   ) : null}
