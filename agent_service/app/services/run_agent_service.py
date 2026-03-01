@@ -166,7 +166,7 @@ def stream_run_agent_workflow(req: RunAgentRequest, route_path: str) -> Generato
             {
                 "stage": "calling_agent",
                 "progress_percent": 56,
-                "status_message": "Calling NVIDIA Nemotron",
+                "status_message": "Calling AI generation service",
             },
         )
 
