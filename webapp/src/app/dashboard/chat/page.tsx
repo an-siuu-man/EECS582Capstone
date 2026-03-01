@@ -535,7 +535,7 @@ function DashboardChatPageContent() {
                 placeholder="Ask a follow-up question..."
                 className="border-transparent bg-transparent focus-visible:ring-0"
               />
-              <Button type="submit" disabled={draft.trim().length === 0} className="rounded-lg bg-brand-blue text-white hover:bg-brand-blue/90">
+              <Button type="submit" disabled={draft.trim().length === 0} className="rounded-lg bg-brand-blue text-primary-foreground hover:bg-brand-blue/90">
                 <Send className="h-4 w-4" />
               </Button>
             </form>

@@ -98,7 +98,7 @@ export default function LandingPage() {
             </motion.p>
             <motion.div variants={item} className="space-x-4 pt-4">
               <Link href="/signup">
-                <Button size="lg" className="h-12 px-8 text-lg bg-brand-blue hover:bg-brand-blue/90 text-white shadow-lg shadow-brand-blue/20">
+                <Button size="lg" className="h-12 px-8 text-lg bg-brand-blue text-primary-foreground shadow-lg shadow-brand-blue/20 hover:bg-brand-blue/90">
                   Start Learning
                   <ArrowRight className="ml-2 h-5 w-5" />
                 </Button>
@@ -169,7 +169,7 @@ export default function LandingPage() {
                      Agentic Workflow
                   </h2>
                   <p className="text-muted-foreground md:text-lg">
-                     Headstart AI isn't just a todo list. It's an intelligent agent that works in the background.
+                     Headstart AI isn&apos;t just a todo list. It&apos;s an intelligent agent that works in the background.
                   </p>
                   <ul className="grid gap-3 py-4">
                      <li className="flex items-center gap-3">
@@ -192,7 +192,7 @@ export default function LandingPage() {
                   <Button variant="secondary" className="border border-brand-gold/30 hover:bg-brand-gold/10">View Architecture</Button>
                </div>
                <div className="mx-auto w-full max-w-[500px] aspect-square rounded-xl bg-gradient-to-tr from-brand-blue/20 via-brand-crimson/5 to-background border border-brand-gold/20 flex items-center justify-center relative overflow-hidden">
-                   <div className="absolute inset-0 bg-grid-white/10 [mask-image:linear-gradient(0deg,white,rgba(255,255,255,0.6))] dark:[mask-image:linear-gradient(0deg,rgba(255,255,255,0.1),transparent)]" />
+                   <div className="absolute inset-0 bg-grid-slate-400/12 [mask-image:linear-gradient(0deg,rgba(247,249,252,0.9),rgba(241,245,249,0.55))] dark:[mask-image:linear-gradient(0deg,rgba(226,232,240,0.12),transparent)]" />
                    <BrainCircuit className="h-32 w-32 text-brand-blue/80" />
                </div>
             </div>
