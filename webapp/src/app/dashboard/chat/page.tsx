@@ -43,7 +43,10 @@ type ChatSessionStatus = "queued" | "running" | "completed" | "failed"
 type ChatSessionStage =
   | "queued"
   | "preparing_payload"
+  | "extracting_pdf"
   | "calling_agent"
+  | "streaming_output"
+  | "validating_output"
   | "parsing_response"
   | "completed"
   | "failed"
@@ -57,6 +60,7 @@ type ChatSessionResponse = {
   stage: ChatSessionStage
   progress_percent: number
   status_message: string
+  streamed_guide_markdown: string
   result: unknown | null
   error: string | null
   payload: AssignmentPayload
@@ -68,12 +72,8 @@ type LocalChatMessage = {
 }
 
 const EASE_OUT = [0.22, 1, 0.36, 1] as const
-
-function sleep(ms: number) {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms)
-  })
-}
+const THINK_OPEN_TAG = "<think>"
+const THINK_CLOSE_TAG = "</think>"
 
 function normalizeResult(result: unknown) {
   if (result == null) return result
@@ -105,6 +105,41 @@ function extractGuideMarkdown(result: unknown) {
   return JSON.stringify(result, null, 2)
 }
 
+function removeThinkBlocks(markdown: string) {
+  if (!markdown) {
+    return { visibleMarkdown: "", isThinking: false }
+  }
+
+  let cursor = 0
+  let visible = ""
+
+  while (cursor < markdown.length) {
+    const openIndex = markdown.indexOf(THINK_OPEN_TAG, cursor)
+    if (openIndex === -1) {
+      visible += markdown.slice(cursor)
+      break
+    }
+
+    visible += markdown.slice(cursor, openIndex)
+    const thinkStart = openIndex + THINK_OPEN_TAG.length
+    const closeIndex = markdown.indexOf(THINK_CLOSE_TAG, thinkStart)
+
+    if (closeIndex === -1) {
+      return {
+        visibleMarkdown: visible.replaceAll(THINK_CLOSE_TAG, ""),
+        isThinking: true,
+      }
+    }
+
+    cursor = closeIndex + THINK_CLOSE_TAG.length
+  }
+
+  return {
+    visibleMarkdown: visible.replaceAll(THINK_CLOSE_TAG, ""),
+    isThinking: false,
+  }
+}
+
 function stageLabel(stage: ChatSessionStage) {
   switch (stage) {
     case "queued":
@@ -113,6 +148,12 @@ function stageLabel(stage: ChatSessionStage) {
       return "Preparing"
     case "calling_agent":
       return "Calling Agent"
+    case "extracting_pdf":
+      return "Extracting PDF"
+    case "streaming_output":
+      return "Streaming Output"
+    case "validating_output":
+      return "Validating Output"
     case "parsing_response":
       return "Parsing Response"
     case "completed":
@@ -145,7 +186,6 @@ function DashboardChatPageContent() {
   const sessionId = (searchParams.get("session") || "").trim()
 
   const [session, setSession] = useState<ChatSessionResponse | null>(null)
-  const [isInitialLoading, setIsInitialLoading] = useState(false)
   const [isPolling, setIsPolling] = useState(false)
   const [errorText, setErrorText] = useState<string | null>(null)
   const [draft, setDraft] = useState("")
@@ -153,6 +193,9 @@ function DashboardChatPageContent() {
   const [showProgressPanel, setShowProgressPanel] = useState(false)
   const [displayProgress, setDisplayProgress] = useState(0)
   const threadContainerRef = useRef<HTMLDivElement | null>(null)
+  const latestSessionRef = useRef<ChatSessionResponse | null>(null)
+  const previousGuideLengthRef = useRef(0)
+  const progressHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const reduceMotion = useReducedMotion()
 
   function scrollThreadToBottom(behavior: ScrollBehavior = "smooth") {
@@ -168,144 +211,136 @@ function DashboardChatPageContent() {
 
   useEffect(() => {
     if (!sessionId) {
-      setSession(null)
-      setErrorText("Missing session id in URL. Open this page from the extension.")
       return
     }
 
-    let cancelled = false
-    let controller: AbortController | null = null
-    let retryDelayMs = 2000
-    let lastSeenUpdatedAt = 0
+    const streamUrl = `/api/chat-session/${encodeURIComponent(sessionId)}/events`
+    const eventSource = new EventSource(streamUrl)
+    let isDisposed = false
 
-    const runPollingLoop = async () => {
-      setIsInitialLoading(true)
+    const applySession = (nextSession: ChatSessionResponse) => {
+      if (isDisposed) return
+      latestSessionRef.current = nextSession
+      setSession(nextSession)
+      setIsPolling(false)
       setErrorText(null)
 
-      while (!cancelled) {
-        const waitMs = document.hidden ? 30000 : 25000
-        const query = new URLSearchParams()
-        query.set("wait_ms", String(lastSeenUpdatedAt > 0 ? waitMs : 0))
-        if (lastSeenUpdatedAt > 0) {
-          query.set("since", String(lastSeenUpdatedAt))
-        }
+      if (progressHideTimerRef.current) {
+        clearTimeout(progressHideTimerRef.current)
+        progressHideTimerRef.current = null
+      }
+      if (nextSession.status === "queued" || nextSession.status === "running") {
+        setShowProgressPanel(true)
+        setDisplayProgress(
+          Math.max(0, Math.min(100, Math.round(nextSession.progress_percent))),
+        )
+      } else if (nextSession.status === "completed") {
+        setShowProgressPanel(true)
+        setDisplayProgress(100)
+        progressHideTimerRef.current = setTimeout(() => {
+          setShowProgressPanel(false)
+          progressHideTimerRef.current = null
+        }, 900)
+      } else if (nextSession.status === "failed") {
+        setShowProgressPanel(false)
+        setDisplayProgress(100)
+      }
 
-        const requestUrl = `/api/chat-session/${encodeURIComponent(sessionId)}?${query.toString()}`
-        controller = new AbortController()
-
-        try {
-          if (lastSeenUpdatedAt > 0) {
-            setIsPolling(true)
-          }
-
-          const response = await fetch(requestUrl, {
-            method: "GET",
-            cache: "no-store",
-            signal: controller.signal,
-          })
-
-          if (cancelled) {
-            break
-          }
-
-          if (response.status === 204) {
-            setIsInitialLoading(false)
-            setIsPolling(false)
-            continue
-          }
-
-          if (!response.ok) {
-            const text = await response.text()
-            throw new Error(text || `Failed to load session (${response.status})`)
-          }
-
-          const data = (await response.json()) as ChatSessionResponse
-          if (cancelled) {
-            break
-          }
-
-          setSession(data)
-          setErrorText(null)
-          setIsInitialLoading(false)
-          setIsPolling(false)
-          retryDelayMs = 2000
-          lastSeenUpdatedAt = data.updated_at
-
-          if (data.status === "completed" || data.status === "failed") {
-            break
-          }
-        } catch (err) {
-          if (cancelled) {
-            break
-          }
-
-          if (err instanceof DOMException && err.name === "AbortError") {
-            break
-          }
-
-          const message = err instanceof Error ? err.message : "Unknown error"
-          setErrorText(`Unable to load chat session: ${message}`)
-          setIsInitialLoading(false)
-          setIsPolling(false)
-          await sleep(retryDelayMs)
-          retryDelayMs = Math.min(retryDelayMs * 2, 12000)
-        }
+      if (nextSession.status === "completed" || nextSession.status === "failed") {
+        eventSource.close()
       }
     }
 
-    void runPollingLoop()
+    const parseSessionMessage = (event: MessageEvent<string>) => {
+      try {
+        const data = JSON.parse(event.data) as ChatSessionResponse
+        applySession(data)
+      } catch {
+        setErrorText("Unable to parse session stream event.")
+      }
+    }
+
+    eventSource.addEventListener("session.snapshot", parseSessionMessage as EventListener)
+    eventSource.addEventListener("session.update", parseSessionMessage as EventListener)
+
+    eventSource.onerror = () => {
+      if (isDisposed) return
+      setIsPolling(true)
+      if (!latestSessionRef.current) {
+        setErrorText("Unable to connect to session stream.")
+      }
+    }
+
+    eventSource.onopen = () => {
+      if (isDisposed) return
+      setIsPolling(false)
+      setErrorText(null)
+    }
 
     return () => {
-      cancelled = true
-      if (controller) {
-        controller.abort()
+      isDisposed = true
+      if (progressHideTimerRef.current) {
+        clearTimeout(progressHideTimerRef.current)
+        progressHideTimerRef.current = null
       }
+      eventSource.close()
     }
   }, [sessionId])
 
-  const payload = session?.payload
+  const effectiveSession =
+    sessionId && session?.session_id === sessionId ? session : null
+  const payload = effectiveSession?.payload
   const attachmentCount = payload?.pdfAttachments?.length ?? 0
-  const createdAtText = useMemo(() => {
-    if (!session?.created_at) return null
-    return format(new Date(session.created_at), "MMM d, yyyy h:mm a")
-  }, [session?.created_at])
+  const createdAtText = effectiveSession?.created_at
+    ? format(new Date(effectiveSession.created_at), "MMM d, yyyy h:mm a")
+    : null
 
-  const guideMarkdown = useMemo(() => {
-    if (!session || session.status !== "completed") return ""
-    return extractGuideMarkdown(session.result)
-  }, [session])
+  const rawGuideMarkdown = useMemo(() => {
+    if (!effectiveSession) return ""
+    if (effectiveSession.streamed_guide_markdown?.trim()) {
+      return effectiveSession.streamed_guide_markdown
+    }
+    if (effectiveSession.status !== "completed") return ""
+    return extractGuideMarkdown(effectiveSession.result)
+  }, [effectiveSession])
 
-  const isGenerating = session?.status === "queued" || session?.status === "running"
-  const progressValue = Math.max(0, Math.min(100, session?.progress_percent ?? 0))
+  const { visibleMarkdown: guideMarkdown, isThinking } = useMemo(
+    () => removeThinkBlocks(rawGuideMarkdown),
+    [rawGuideMarkdown],
+  )
+
+  const hasGuideContent = guideMarkdown.trim().length > 0
+  const showThinkingIndicator = Boolean(
+    effectiveSession &&
+      (effectiveSession.status === "running" || effectiveSession.status === "queued") &&
+      isThinking &&
+      !hasGuideContent,
+  )
 
   useEffect(() => {
-    let hideTimer: ReturnType<typeof setTimeout> | null = null
-
-    if (isGenerating) {
-      setShowProgressPanel(true)
-      setDisplayProgress(progressValue)
-    } else if (session?.status === "completed") {
-      setShowProgressPanel(true)
-      setDisplayProgress(100)
-      hideTimer = setTimeout(() => {
-        setShowProgressPanel(false)
-      }, 900)
-    } else if (session?.status === "failed") {
-      setShowProgressPanel(false)
+    const currentLength = guideMarkdown.length
+    if (currentLength > previousGuideLengthRef.current) {
+      requestAnimationFrame(() => {
+        scrollThreadToBottom("smooth")
+      })
     }
+    previousGuideLengthRef.current = currentLength
+  }, [guideMarkdown])
 
-    return () => {
-      if (hideTimer) {
-        clearTimeout(hideTimer)
-      }
-    }
-  }, [isGenerating, progressValue, session?.status])
-
-  const progressLabel = session?.status === "completed" ? "Guide ready" : session?.status_message || "Generating guide..."
+  const progressLabel =
+    effectiveSession?.status === "completed"
+      ? "Guide ready"
+      : effectiveSession?.status_message || "Generating guide..."
   const progressPanelTone =
-    session?.status === "completed"
+    effectiveSession?.status === "completed"
       ? "rounded-lg border border-emerald-300/60 bg-emerald-50/80 p-3 text-sm"
       : "rounded-lg border border-brand-gold/40 bg-brand-gold/10 p-3 text-sm"
+  const resolvedErrorText = sessionId
+    ? errorText
+    : "Missing session id in URL. Open this page from the extension."
+  const isSessionLoading = Boolean(
+    sessionId && !effectiveSession && !resolvedErrorText && !isPolling,
+  )
 
   function handleSend(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -317,7 +352,7 @@ function DashboardChatPageContent() {
       { role: "user", content: text },
       {
         role: "assistant",
-        content: "Follow-up chat transport is not wired yet. SSE streaming will be added next.",
+        content: "Follow-up chat endpoint is not wired yet.",
       },
     ])
     setDraft("")
@@ -352,9 +387,9 @@ function DashboardChatPageContent() {
             The guide starts automatically after you click Generate Guide in the extension.
           </p>
         </div>
-        {session ? (
+        {effectiveSession ? (
           <Badge variant="outline" className="w-fit border-brand-blue/40 bg-brand-blue/10 px-3 py-1.5 text-brand-blue">
-            {stageLabel(session.stage)}
+            {stageLabel(effectiveSession.stage)}
           </Badge>
         ) : null}
       </motion.div>
@@ -380,11 +415,11 @@ function DashboardChatPageContent() {
             <CardDescription>Session from extension handoff</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
-            {isInitialLoading && !session ? (
+            {isSessionLoading && !effectiveSession ? (
               <p className="text-muted-foreground">Loading session...</p>
             ) : null}
 
-            {!isInitialLoading && !payload ? (
+            {!isSessionLoading && !payload ? (
               <p className="text-destructive">No session payload available.</p>
             ) : null}
 
@@ -418,18 +453,18 @@ function DashboardChatPageContent() {
                     <p className="font-medium">{createdAtText}</p>
                   </div>
                 ) : null}
-                {session ? (
+                {effectiveSession ? (
                   <>
                     <div>
                       <p className="text-muted-foreground">Status</p>
-                      <p className="font-medium capitalize">{session.status}</p>
+                      <p className="font-medium capitalize">{effectiveSession.status}</p>
                     </div>
                     <div>
                       <p className="text-muted-foreground">Stage</p>
-                      <p className="font-medium">{stageLabel(session.stage)}</p>
+                      <p className="font-medium">{stageLabel(effectiveSession.stage)}</p>
                     </div>
                     {isPolling ? (
-                      <p className="text-xs text-muted-foreground">Syncing latest state...</p>
+                      <p className="text-xs text-muted-foreground">Reconnecting stream...</p>
                     ) : null}
                   </>
                 ) : null}
@@ -462,9 +497,9 @@ function DashboardChatPageContent() {
                 </div>
 
                 <AnimatePresence initial={false}>
-                  {showProgressPanel && session ? (
+                  {showProgressPanel && effectiveSession ? (
                     <motion.div
-                      key={`progress-${session.status}`}
+                      key={`progress-${effectiveSession.status}`}
                       initial={reduceMotion ? false : { opacity: 0, y: -6, scale: 0.98 }}
                       animate={reduceMotion ? undefined : { opacity: 1, y: 0, scale: 1 }}
                       exit={reduceMotion ? undefined : { opacity: 0, y: -8, scale: 0.98 }}
@@ -473,7 +508,7 @@ function DashboardChatPageContent() {
                     >
                     <div className="mb-2 flex items-center justify-between gap-2">
                       <span className="inline-flex items-center gap-2 font-medium text-foreground">
-                        {session.status !== "completed" ? (
+                        {effectiveSession.status !== "completed" ? (
                           <LoaderCircle className="h-4 w-4 animate-spin" />
                         ) : null}
                         {progressLabel}
@@ -486,7 +521,32 @@ function DashboardChatPageContent() {
                 </AnimatePresence>
 
                 <AnimatePresence initial={false}>
-                  {session?.status === "completed" ? (
+                  {showThinkingIndicator ? (
+                    <motion.div
+                      key="thinking-indicator"
+                      initial={reduceMotion ? false : { opacity: 0, y: 8 }}
+                      animate={reduceMotion ? undefined : { opacity: 1, y: 0 }}
+                      exit={reduceMotion ? undefined : { opacity: 0, y: -6 }}
+                      transition={reduceMotion ? undefined : { duration: 0.28, ease: EASE_OUT }}
+                      className="rounded-xl border border-border/60 bg-card/90 px-4 py-3 text-sm shadow-[0_10px_30px_-22px_rgba(15,23,42,0.55)]"
+                    >
+                      {reduceMotion ? (
+                        <span className="font-medium text-muted-foreground">Thinking</span>
+                      ) : (
+                        <motion.span
+                          className="inline-block bg-[linear-gradient(110deg,rgba(100,116,139,0.35)_0%,rgba(248,250,252,0.98)_45%,rgba(100,116,139,0.35)_90%)] bg-[length:220%_100%] bg-clip-text font-semibold text-transparent"
+                          animate={{ backgroundPosition: ["200% 0%", "-20% 0%"] }}
+                          transition={{ duration: 1.2, repeat: Infinity, ease: "linear" }}
+                        >
+                          Thinking
+                        </motion.span>
+                      )}
+                    </motion.div>
+                  ) : null}
+                </AnimatePresence>
+
+                <AnimatePresence initial={false}>
+                  {hasGuideContent ? (
                     <motion.div
                       key="guide-body"
                       initial={reduceMotion ? false : { opacity: 0, y: 10 }}
@@ -503,9 +563,9 @@ function DashboardChatPageContent() {
                   ) : null}
                 </AnimatePresence>
 
-                {session?.status === "failed" ? (
+                {effectiveSession?.status === "failed" ? (
                   <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
-                    Error generating guide: {session.error || "Unknown error"}
+                    Error generating guide: {effectiveSession.error || "Unknown error"}
                   </div>
                 ) : null}
 
@@ -540,7 +600,7 @@ function DashboardChatPageContent() {
               </Button>
             </form>
 
-            {errorText ? <p className="text-sm text-destructive">{errorText}</p> : null}
+            {resolvedErrorText ? <p className="text-sm text-destructive">{resolvedErrorText}</p> : null}
           </CardContent>
         </Card>
         </motion.div>

@@ -25,7 +25,7 @@ import json
 import os
 import re
 import time
-from typing import Optional
+from typing import Iterator, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
@@ -82,6 +82,29 @@ Visual emphasis context (high/medium significance markers from PDF annotations/s
 
 Attached file contents (may be empty):
 {pdf_text}\
+"""
+
+SYSTEM_PROMPT_MARKDOWN = """\
+You are an academic assistant helping a student understand a Canvas assignment.
+
+Produce one polished markdown guide body for this assignment.
+
+Formatting requirements:
+- Return MARKDOWN ONLY (no JSON, no code fences, no preamble).
+- Include clear headings/subheadings directly in the markdown body.
+- Use this practical structure and order:
+  - `## Assignment Overview`
+  - `## Key Requirements`
+  - `## Deliverables`
+  - `## Milestones`
+  - `## Study Plan`
+  - `## Risks`
+  - `## Referenced Materials` (when file context exists)
+- Use concise, student-friendly language with actionable bullets.
+
+Important timezone rule:
+- If the payload contains `userTimezone`, use that timezone for all dates/times.
+- If timezone is not provided, keep due-date references as provided.
 """
 
 
@@ -357,3 +380,115 @@ def run_headstart_agent(payload: dict, pdf_text: str = "", visual_signals: Optio
         timezone_str,
         visual_signals_str,
     )
+
+
+def _strip_markdown_fences(text: str) -> str:
+    stripped = text.strip()
+    if stripped.startswith("```") and stripped.endswith("```"):
+        stripped = re.sub(r"^```(?:markdown|md)?\s*", "", stripped, flags=re.IGNORECASE)
+        stripped = re.sub(r"\s*```$", "", stripped)
+    return stripped.strip()
+
+
+def _extract_markdown_payload(text: str) -> str:
+    cleaned = _strip_markdown_fences(_maybe_unwrap_text_dict(text).strip())
+    if not cleaned:
+        return ""
+
+    if cleaned.startswith("{") and '"guideMarkdown"' in cleaned:
+        try:
+            parsed = _try_parse_json(cleaned)
+            markdown = parsed.get("guideMarkdown")
+            if isinstance(markdown, str):
+                return _strip_markdown_fences(markdown)
+        except Exception:
+            logger.debug("Unable to parse streamed markdown JSON wrapper; using raw text.")
+    return cleaned
+
+
+def _build_markdown_chain(llm):
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", SYSTEM_PROMPT_MARKDOWN),
+            ("human", HUMAN_TEMPLATE),
+        ]
+    )
+    return prompt | llm
+
+
+def stream_headstart_agent_markdown(
+    payload: dict,
+    pdf_text: str = "",
+    visual_signals: Optional[list[dict]] = None,
+) -> Iterator[str]:
+    """
+    Stream markdown chunks from the model when provider streaming is available.
+    Falls back to a single invoke split into chunks when needed.
+    """
+    api_key = os.getenv("NVIDIA_API_KEY")
+    if not api_key:
+        raise RuntimeError("NVIDIA_API_KEY is not set")
+
+    logger.info(
+        "Initializing streaming LLM | model=%s temperature=%s max_tokens=%d",
+        MODEL_NAME,
+        TEMPERATURE,
+        MAX_OUTPUT_TOKENS,
+    )
+
+    llm = build_nvidia_chat_client(
+        model_name=MODEL_NAME,
+        temperature=TEMPERATURE,
+        max_tokens=MAX_OUTPUT_TOKENS,
+    )
+    chain = _build_markdown_chain(llm)
+
+    payload_str = json.dumps(payload, ensure_ascii=False)
+    pdf_text_str = pdf_text or "(no attached files)"
+    timezone_str = payload.get("userTimezone") or "Not specified (use due date as-is)"
+    visual_signals_str = _format_visual_signals_for_prompt(visual_signals)
+    inputs = {
+        "payload": payload_str,
+        "pdf_text": pdf_text_str,
+        "timezone": timezone_str,
+        "visual_signals": visual_signals_str,
+    }
+
+    has_streamed_content = False
+    streamed_text = ""
+    try:
+        stream_fn = getattr(chain, "stream", None)
+        if callable(stream_fn):
+            logger.info("Streaming markdown response from provider")
+            for chunk in stream_fn(inputs):
+                chunk_text = _to_text(chunk)
+                if not chunk_text:
+                    continue
+                if chunk_text.startswith(streamed_text):
+                    delta = chunk_text[len(streamed_text) :]
+                else:
+                    delta = chunk_text
+
+                if not delta:
+                    continue
+
+                streamed_text += delta
+                has_streamed_content = True
+                yield delta
+    except Exception as exc:
+        logger.warning("Provider streaming failed; falling back to single invoke: %s", repr(exc))
+        has_streamed_content = False
+        streamed_text = ""
+
+    if has_streamed_content:
+        return
+
+    logger.info("Using single invoke markdown fallback")
+    result = chain.invoke(inputs)
+    markdown = _extract_markdown_payload(_to_text(result))
+    if not markdown:
+        raise RuntimeError("Model returned empty markdown output.")
+
+    chunk_size = 900
+    for start in range(0, len(markdown), chunk_size):
+        yield markdown[start : start + chunk_size]
