@@ -1,4 +1,11 @@
 export type ChatSessionStatus = "queued" | "running" | "completed" | "failed"
+export type ChatSessionStage =
+  | "queued"
+  | "preparing_payload"
+  | "calling_agent"
+  | "parsing_response"
+  | "completed"
+  | "failed"
 
 export type ChatSessionRecord = {
   id: string
@@ -6,6 +13,9 @@ export type ChatSessionRecord = {
   createdAt: number
   updatedAt: number
   status: ChatSessionStatus
+  stage: ChatSessionStage
+  progressPercent: number
+  statusMessage: string
   result?: unknown
   error?: string
 }
@@ -42,6 +52,9 @@ export function createChatSession(payload: unknown) {
     createdAt: now,
     updatedAt: now,
     status: "queued",
+    stage: "queued",
+    progressPercent: 5,
+    statusMessage: "Queued",
   }
   chatSessions.set(id, session)
   return session
@@ -67,6 +80,33 @@ export function markChatSessionRunning(sessionId: string) {
   const updated: ChatSessionRecord = {
     ...session,
     status: "running",
+    stage: "preparing_payload",
+    progressPercent: 15,
+    statusMessage: "Preparing assignment payload",
+    updatedAt: Date.now(),
+    error: undefined,
+  }
+  chatSessions.set(sessionId, updated)
+  return updated
+}
+
+export function updateChatSessionProgress(
+  sessionId: string,
+  input: {
+    stage: ChatSessionStage
+    progressPercent: number
+    statusMessage: string
+  }
+) {
+  const session = getChatSession(sessionId)
+  if (!session) return null
+
+  const updated: ChatSessionRecord = {
+    ...session,
+    status: "running",
+    stage: input.stage,
+    progressPercent: Math.max(0, Math.min(100, Math.round(input.progressPercent))),
+    statusMessage: input.statusMessage,
     updatedAt: Date.now(),
     error: undefined,
   }
@@ -81,6 +121,9 @@ export function markChatSessionCompleted(sessionId: string, result: unknown) {
   const updated: ChatSessionRecord = {
     ...session,
     status: "completed",
+    stage: "completed",
+    progressPercent: 100,
+    statusMessage: "Guide ready",
     result,
     updatedAt: Date.now(),
     error: undefined,
@@ -96,6 +139,9 @@ export function markChatSessionFailed(sessionId: string, error: string) {
   const updated: ChatSessionRecord = {
     ...session,
     status: "failed",
+    stage: "failed",
+    progressPercent: 100,
+    statusMessage: "Guide generation failed",
     error,
     updatedAt: Date.now(),
   }

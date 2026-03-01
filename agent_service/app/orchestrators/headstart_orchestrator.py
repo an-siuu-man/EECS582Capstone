@@ -12,9 +12,9 @@ Inputs:
 - Acceptable: Normalized assignment payload dictionary and optional extracted PDF text string.
 - Unacceptable: Missing payload dictionary, empty model responses, or malformed JSON output.
 Postconditions:
-- Returns structured guide object parsed from model output.
+- Returns a validated markdown guide object parsed from model output.
 Returns:
-- Dictionary matching RunAgentResponse schema fields.
+- Dictionary containing `guideMarkdown`.
 Errors/Exceptions:
 - RuntimeError for missing API key or repeated parsing/generation failures.
 - ValueError for irreparable malformed model JSON output.
@@ -50,21 +50,19 @@ then produce a structured guide that helps the student succeed.
 If visual emphasis context is provided (highlighted / underlined / style-emphasized text),
 treat high-significance markers as likely important requirements and reflect that priority.
 
-Guidelines for the "description" field:
-- Write in **markdown** format (use headings, bold, bullet lists).
-- Start with a concise overview of what the assignment is about.
-- Cover important details: topic, scope, expectations.
-- If attached file contents are provided, add a section "### Referenced Materials"
-  summarizing key information from those files and how they relate to the assignment.
-- Be specific and actionable — avoid vague platitudes.
-
-Guidelines for other fields:
-- "keyRequirements": Specific requirements the student must fulfill.
-- "deliverables": Concrete items the student must submit.
-- "milestones": Suggested timeline working backwards from the due date.
-  All dates and times MUST be expressed in the student's timezone (provided in the payload).
-- "studyPlan": Suggested study blocks (duration in minutes + focus area).
-- "risks": Potential pitfalls or common mistakes to watch for.
+Output requirement:
+- Return one markdown body in the `guideMarkdown` field.
+- The markdown body must include headings/subheadings and bullets directly in the text.
+- Do not return split section arrays like keyRequirements or milestones.
+- Use this exact practical, student-friendly structure:
+  - `## Assignment Overview`
+  - `## Key Requirements`
+  - `## Deliverables`
+  - `## Milestones`
+  - `## Study Plan`
+  - `## Risks`
+  - `## Referenced Materials` (when file context exists)
+- Use concrete, actionable wording and avoid filler.
 
 Important: When the payload includes a "userTimezone" field, use that timezone for ALL dates
 and times in your output (milestones, deadlines, etc.). Format dates clearly, e.g.
@@ -258,12 +256,7 @@ Use DOUBLE QUOTES for all keys and string values. No trailing commas.
 
 Return a JSON object matching this schema:
 {{
-  "description": "markdown string",
-  "keyRequirements": ["string"],
-  "deliverables": ["string"],
-  "milestones": [{{"date": "string", "task": "string"}}],
-  "studyPlan": [{{"durationMin": 30, "focus": "string"}}],
-  "risks": ["string"]
+  "guideMarkdown": "single markdown guide body with headings and bullet lists"
 }}
 
 Assignment payload:

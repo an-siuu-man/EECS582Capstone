@@ -5,12 +5,7 @@ from app.schemas.requests import RunAgentRequest
 from app.services.run_agent_service import run_agent_workflow
 
 SAMPLE_RESULT = {
-    "description": "summary",
-    "keyRequirements": ["req"],
-    "deliverables": ["del"],
-    "milestones": [{"date": "Feb 20", "task": "Draft"}],
-    "studyPlan": [{"durationMin": 30, "focus": "Read prompt"}],
-    "risks": ["Late start"],
+    "guideMarkdown": "## Assignment Overview\n\nWrite a concise draft.",
 }
 
 
