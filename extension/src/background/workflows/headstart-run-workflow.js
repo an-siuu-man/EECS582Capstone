@@ -1,5 +1,22 @@
 /**
- * Workflow for START_HEADSTART_RUN message: build payload and create a dashboard chat session.
+ * Artifact: extension/src/background/workflows/headstart-run-workflow.js
+ * Purpose: Orchestrates START_HEADSTART_RUN handling by building a normalized payload and creating a dashboard chat session handoff.
+ * Author: Ansuman Sharma
+ * Created: 2026-02-27
+ * Revised:
+ * - 2026-03-01: Added standardized file-level prologue metadata and interface contracts. (Ansuman Sharma)
+ * Preconditions:
+ * - Executed in Chrome extension background service-worker context with runtime, tabs, and storage APIs available.
+ * Inputs:
+ * - Acceptable: A Canvas assignment `tab` object (with `id` and assignment URL) and optional `pageTitle` string.
+ * - Unacceptable: Missing/invalid tab references, non-assignment URLs, or missing stored assignment records.
+ * Postconditions:
+ * - On success, creates a webapp chat session and sends HEADSTART_RESULT with dashboard redirect URL to the source tab.
+ * - On failure, sends HEADSTART_ERROR with a user-safe message to the source tab.
+ * Returns:
+ * - `handleStartHeadstartRun` returns `Promise<void>` after completing messaging side effects.
+ * Errors/Exceptions:
+ * - Network, storage, and runtime messaging failures are caught and surfaced via HEADSTART_ERROR messages.
  */
 
 import { createChatSession } from "../../clients/webapp-client.js";

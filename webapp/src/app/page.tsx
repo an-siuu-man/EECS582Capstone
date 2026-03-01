@@ -1,3 +1,23 @@
+/**
+ * Artifact: webapp/src/app/page.tsx
+ * Purpose: Renders the public landing page experience with product messaging, feature highlights, and auth entry links.
+ * Author: Ansuman Sharma
+ * Created: 2026-02-09
+ * Revised:
+ * - 2026-03-01: Added standardized file-level prologue metadata and interface contracts. (Ansuman Sharma)
+ * Preconditions:
+ * - Executed in a Next.js client-component context with required UI component imports and motion support available.
+ * Inputs:
+ * - Acceptable: No direct function inputs; component relies on static content and client runtime environment.
+ * - Unacceptable: Missing required component dependencies or invalid runtime rendering environment.
+ * Postconditions:
+ * - Landing page UI is rendered with navigation links to login/signup and supporting feature sections.
+ * Returns:
+ * - `LandingPage` returns JSX for the main public homepage.
+ * Errors/Exceptions:
+ * - Client rendering or dependency-load failures may produce runtime errors during page render.
+ */
+
 "use client"
 
 import Link from "next/link"

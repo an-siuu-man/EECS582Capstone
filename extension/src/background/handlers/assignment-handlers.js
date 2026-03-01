@@ -1,5 +1,21 @@
 /**
- * Message handlers for assignment detection and extraction updates.
+ * Artifact: extension/src/background/handlers/assignment-handlers.js
+ * Purpose: Handles assignment detection/extraction runtime messages and synchronizes assignment records in extension storage.
+ * Author: Ansuman Sharma
+ * Created: 2026-02-27
+ * Revised:
+ * - 2026-03-01: Added standardized file-level prologue metadata and interface contracts. (Ansuman Sharma)
+ * Preconditions:
+ * - Background service worker is active with chrome.runtime messaging and chrome.storage.local permissions.
+ * Inputs:
+ * - Acceptable: ASSIGNMENT_DETECTED and ASSIGNMENT_DATA payloads with Canvas identifiers and extracted assignment fields.
+ * - Unacceptable: Missing course/assignment identifiers, malformed payload objects, or non-Canvas message shapes.
+ * Postconditions:
+ * - Assignment records are inserted/updated in storage and badge state may be updated for newly detected assignments.
+ * Returns:
+ * - Exported handlers return `Promise<void>` after storage and logging side effects.
+ * Errors/Exceptions:
+ * - Storage and runtime API failures can throw and are expected to be handled by caller workflow boundaries.
  */
 
 import { createLogger } from "../../shared/logger.js";
