@@ -15,6 +15,21 @@ const log = createLogger("SW.Run");
 
 const BACKEND_BASE_URL = "http://localhost:3000";
 
+function sendToTabWithLogging(tabId, message, logContext) {
+  if (!tabId) {
+    log.error(`${logContext}: missing tab id; cannot send message`);
+    return;
+  }
+
+  chrome.tabs.sendMessage(tabId, message, () => {
+    if (chrome.runtime.lastError) {
+      log.error(`${logContext}: delivery failed:`, chrome.runtime.lastError.message);
+      return;
+    }
+    log.info(`${logContext}: delivered to tab ${tabId}`);
+  });
+}
+
 /**
  * Build and send a normalized payload for the currently-open assignment tab.
  */
@@ -22,10 +37,10 @@ export async function handleStartHeadstartRun(tab, pageTitle) {
   const ids = getCanvasIdsFromUrl(tab?.url || "");
   if (!ids) {
     log.warn("START_HEADSTART_RUN: not on a Canvas assignment URL:", tab?.url);
-    chrome.tabs.sendMessage(tab?.id, {
+    sendToTabWithLogging(tab?.id, {
       type: MESSAGE_TYPES.HEADSTART_ERROR,
       error: "Not on a Canvas assignment page.",
-    });
+    }, "HEADSTART_ERROR");
     return;
   }
 
@@ -38,10 +53,10 @@ export async function handleStartHeadstartRun(tab, pageTitle) {
 
   if (!stored) {
     log.warn("No stored record for:", key);
-    chrome.tabs.sendMessage(tab?.id, {
+    sendToTabWithLogging(tab?.id, {
       type: MESSAGE_TYPES.HEADSTART_ERROR,
       error: `No stored assignment found for key ${key}`,
-    });
+    }, "HEADSTART_ERROR");
     return;
   }
 
@@ -93,15 +108,15 @@ export async function handleStartHeadstartRun(tab, pageTitle) {
     log.info(`/api/run-agent → 200 (${Date.now() - runStart}ms)`);
     log.info("Sending HEADSTART_RESULT to tab:", tab?.id);
 
-    chrome.tabs.sendMessage(tab?.id, {
+    sendToTabWithLogging(tab?.id, {
       type: MESSAGE_TYPES.HEADSTART_RESULT,
       result: ai,
-    });
+    }, "HEADSTART_RESULT");
   } catch (e) {
     log.error("handleStartHeadstartRun failed:", e?.message || e);
-    chrome.tabs.sendMessage(tab?.id, {
+    sendToTabWithLogging(tab?.id, {
       type: MESSAGE_TYPES.HEADSTART_ERROR,
       error: String(e?.message || e),
-    });
+    }, "HEADSTART_ERROR");
   }
 }
