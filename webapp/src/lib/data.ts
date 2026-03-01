@@ -1,4 +1,4 @@
-import { Assignment, Course, User, Stat } from "./types";
+import { Assignment, Course, GeneratedGuide, User, Stat } from "./types";
 import { addDays, subHours } from "date-fns";
 
 export const currentUser: User = {
@@ -70,6 +70,41 @@ export const stats: Stat[] = [
   { label: "Study Hours", value: "14h", change: "+4h", trend: "up" },
 ];
 
+export const generatedGuides: GeneratedGuide[] = [
+  {
+    id: "g1",
+    title: "Neural Network Implementation Guide",
+    courseId: "c1",
+    assignmentId: "a1",
+    generatedAt: subHours(new Date(), 1).toISOString(),
+    status: "Ready",
+  },
+  {
+    id: "g2",
+    title: "SQL Query Optimization Walkthrough",
+    courseId: "c3",
+    assignmentId: "a3",
+    generatedAt: subHours(new Date(), 6).toISOString(),
+    status: "Ready",
+  },
+  {
+    id: "g3",
+    title: "React Component Lifecycle Notes",
+    courseId: "c2",
+    assignmentId: "a2",
+    generatedAt: subHours(new Date(), 22).toISOString(),
+    status: "Refreshing",
+  },
+  {
+    id: "g4",
+    title: "Vector Spaces Quiz Prep Sheet",
+    courseId: "c4",
+    assignmentId: "a4",
+    generatedAt: subHours(new Date(), 40).toISOString(),
+    status: "Ready",
+  },
+];
+
 export function getCourse(id: string): Course | undefined {
   return courses.find((c) => c.id === id);
 }
@@ -80,7 +115,13 @@ export async function fetchDashboardData() {
   return {
     user: currentUser,
     stats,
-    upcomingAssignments: assignments.filter(a => a.status !== "Completed").sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime()).slice(0, 3),
-    recentActivity: assignments.slice(0, 4),
+    upcomingAssignments: assignments
+      .filter((a) => a.status !== "Completed")
+      .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
+      .slice(0, 6),
+    generatedGuides: generatedGuides
+      .slice()
+      .sort((a, b) => new Date(b.generatedAt).getTime() - new Date(a.generatedAt).getTime())
+      .slice(0, 6),
   };
 }

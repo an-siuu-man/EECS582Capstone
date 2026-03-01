@@ -1,6 +1,6 @@
 "use client"
 
-import { type FormEvent, Suspense, useEffect, useMemo, useState } from "react"
+import { type FormEvent, Suspense, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { format } from "date-fns"
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion"
@@ -152,7 +152,19 @@ function DashboardChatPageContent() {
   const [localMessages, setLocalMessages] = useState<LocalChatMessage[]>([])
   const [showProgressPanel, setShowProgressPanel] = useState(false)
   const [displayProgress, setDisplayProgress] = useState(0)
+  const threadContainerRef = useRef<HTMLDivElement | null>(null)
   const reduceMotion = useReducedMotion()
+
+  function scrollThreadToBottom(behavior: ScrollBehavior = "smooth") {
+    const viewport = threadContainerRef.current?.querySelector<HTMLDivElement>(
+      "[data-slot='scroll-area-viewport']"
+    )
+    if (!viewport) return
+    viewport.scrollTo({
+      top: viewport.scrollHeight,
+      behavior,
+    })
+  }
 
   useEffect(() => {
     if (!sessionId) {
@@ -309,6 +321,11 @@ function DashboardChatPageContent() {
       },
     ])
     setDraft("")
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        scrollThreadToBottom("smooth")
+      })
+    })
   }
 
   return (
@@ -316,10 +333,9 @@ function DashboardChatPageContent() {
       initial={reduceMotion ? false : { opacity: 0, y: 12 }}
       animate={reduceMotion ? undefined : { opacity: 1, y: 0 }}
       transition={reduceMotion ? undefined : { duration: 0.45, ease: EASE_OUT }}
-      className="relative space-y-6 overflow-hidden rounded-3xl border border-border/60 bg-gradient-to-b from-background via-background to-muted/20 p-4 shadow-[0_30px_90px_-45px_rgba(2,6,23,0.6)] md:p-6"
+      className="relative w-full space-y-6 overflow-hidden rounded-3xl border border-border/60 bg-gradient-to-b from-background via-background to-muted/20 p-4 shadow-[0_30px_90px_-45px_rgba(2,6,23,0.6)] md:p-6"
     >
-      <div className="pointer-events-none absolute -right-28 -top-20 h-72 w-72 rounded-full bg-brand-blue/15 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-24 -left-20 h-72 w-72 rounded-full bg-brand-crimson/10 blur-3xl" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_70%_at_50%_-5%,rgba(148,163,184,0.12),transparent_62%),radial-gradient(120%_70%_at_50%_110%,rgba(100,116,139,0.08),transparent_68%)]" />
 
       <motion.div
         initial={reduceMotion ? false : { opacity: 0, y: 8 }}
@@ -347,13 +363,13 @@ function DashboardChatPageContent() {
         initial={reduceMotion ? false : { opacity: 0, y: 10 }}
         animate={reduceMotion ? undefined : { opacity: 1, y: 0 }}
         transition={reduceMotion ? undefined : { duration: 0.4, ease: EASE_OUT, delay: 0.1 }}
-        className="grid gap-4 lg:grid-cols-3"
+        className="grid items-start gap-4 lg:grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)]"
       >
         <motion.div
           initial={reduceMotion ? false : { opacity: 0, x: -8 }}
           animate={reduceMotion ? undefined : { opacity: 1, x: 0 }}
           transition={reduceMotion ? undefined : { duration: 0.35, ease: EASE_OUT, delay: 0.15 }}
-          className="lg:col-span-1"
+          className="min-w-0"
         >
           <Card className="h-full border-border/50 bg-card/85 shadow-sm backdrop-blur">
           <CardHeader>
@@ -427,9 +443,9 @@ function DashboardChatPageContent() {
           initial={reduceMotion ? false : { opacity: 0, x: 8 }}
           animate={reduceMotion ? undefined : { opacity: 1, x: 0 }}
           transition={reduceMotion ? undefined : { duration: 0.35, ease: EASE_OUT, delay: 0.18 }}
-          className="lg:col-span-2"
+          className="min-w-0"
         >
-          <Card className="border-border/50 bg-card/90 shadow-[0_18px_45px_-28px_rgba(15,23,42,0.55)] backdrop-blur">
+          <Card className="flex h-[min(70vh,780px)] min-h-[480px] min-w-0 flex-col border-border/50 bg-card/90 shadow-[0_18px_45px_-28px_rgba(15,23,42,0.55)] backdrop-blur">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Bot className="h-4 w-4" />
@@ -437,9 +453,10 @@ function DashboardChatPageContent() {
             </CardTitle>
             <CardDescription>Guide generation progress and chat thread.</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <ScrollArea className="h-[460px] rounded-xl border border-border/60 bg-gradient-to-b from-muted/15 via-card to-card">
-              <div className="space-y-3 p-4">
+          <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
+            <div ref={threadContainerRef} className="min-h-0 flex-1">
+              <ScrollArea className="h-full rounded-xl border border-border/60 bg-gradient-to-b from-muted/15 via-card to-card">
+                <div className="space-y-3 p-4 pr-5">
                 <div className="rounded-lg border border-dashed border-brand-blue/35 bg-brand-blue/5 p-3 text-sm">
                   Assignment context received from extension.
                 </div>
@@ -507,8 +524,9 @@ function DashboardChatPageContent() {
                     {message.content}
                   </motion.div>
                 ))}
-              </div>
-            </ScrollArea>
+                </div>
+              </ScrollArea>
+            </div>
 
             <form onSubmit={handleSend} className="flex items-center gap-2 rounded-xl border border-border/60 bg-muted/20 p-2">
               <Input
@@ -517,7 +535,7 @@ function DashboardChatPageContent() {
                 placeholder="Ask a follow-up question..."
                 className="border-transparent bg-transparent focus-visible:ring-0"
               />
-              <Button type="submit" disabled={draft.trim().length === 0} className="rounded-lg bg-brand-blue text-white hover:bg-brand-blue/90">
+              <Button type="submit" disabled={draft.trim().length === 0} className="rounded-lg bg-brand-blue text-primary-foreground hover:bg-brand-blue/90">
                 <Send className="h-4 w-4" />
               </Button>
             </form>

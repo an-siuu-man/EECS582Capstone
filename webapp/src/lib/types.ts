@@ -19,6 +19,15 @@ export interface Assignment {
   points?: number;
 }
 
+export interface GeneratedGuide {
+  id: string;
+  title: string;
+  courseId: string;
+  assignmentId?: string;
+  generatedAt: string; // ISO date string
+  status: "Ready" | "Refreshing";
+}
+
 export interface User {
   id: string;
   name: string;
