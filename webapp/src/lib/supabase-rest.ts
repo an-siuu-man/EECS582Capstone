@@ -27,6 +27,13 @@ function getSupabaseEnv() {
   };
 }
 
+function buildSupabaseAuthHeaders(serviceRoleKey: string) {
+  return {
+    apikey: serviceRoleKey,
+    Authorization: `Bearer ${serviceRoleKey}`,
+  };
+}
+
 export async function supabaseTableRequest<T>(input: {
   table: string;
   method?: "GET" | "POST" | "PATCH" | "DELETE";
@@ -49,8 +56,7 @@ export async function supabaseTableRequest<T>(input: {
   }`;
 
   const headers: Record<string, string> = {
-    apikey: serviceRoleKey,
-    Authorization: `Bearer ${serviceRoleKey}`,
+    ...buildSupabaseAuthHeaders(serviceRoleKey),
     Accept: input.single ? "application/vnd.pgrst.object+json" : "application/json",
     ...input.headers,
   };
@@ -87,6 +93,98 @@ export async function supabaseTableRequest<T>(input: {
   }
 
   return parsedBody as T;
+}
+
+function encodeStoragePath(path: string) {
+  return path
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+}
+
+export async function supabaseStorageUploadObject(input: {
+  bucket: string;
+  path: string;
+  data: Uint8Array;
+  contentType?: string;
+  upsert?: boolean;
+}) {
+  const { url, serviceRoleKey } = getSupabaseEnv();
+  const encodedPath = encodeStoragePath(input.path);
+  const endpoint = `${url}/storage/v1/object/${encodeURIComponent(input.bucket)}/${encodedPath}`;
+  const copy = new Uint8Array(input.data.byteLength);
+  copy.set(input.data);
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      ...buildSupabaseAuthHeaders(serviceRoleKey),
+      "Content-Type": input.contentType ?? "application/octet-stream",
+      "x-upsert": input.upsert ? "true" : "false",
+    },
+    body: new Blob([copy.buffer], {
+      type: input.contentType ?? "application/octet-stream",
+    }),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    const rawText = await response.text();
+    throw new SupabaseRestError(
+      `Supabase storage upload failed (${response.status})`,
+      response.status,
+      safeJsonParse(rawText) ?? rawText,
+    );
+  }
+}
+
+export async function supabaseStorageCreateSignedUrl(input: {
+  bucket: string;
+  path: string;
+  expiresInSeconds: number;
+}) {
+  const { url, serviceRoleKey } = getSupabaseEnv();
+  const encodedPath = encodeStoragePath(input.path);
+  const endpoint = `${url}/storage/v1/object/sign/${encodeURIComponent(input.bucket)}/${encodedPath}`;
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      ...buildSupabaseAuthHeaders(serviceRoleKey),
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({
+      expiresIn: Math.max(60, Math.floor(input.expiresInSeconds)),
+    }),
+    cache: "no-store",
+  });
+
+  const rawText = await response.text();
+  const parsedBody = rawText.trim().length > 0 ? safeJsonParse(rawText) : null;
+
+  if (!response.ok) {
+    throw new SupabaseRestError(
+      `Supabase signed URL creation failed (${response.status})`,
+      response.status,
+      parsedBody ?? rawText,
+    );
+  }
+
+  if (!parsedBody || typeof parsedBody !== "object") {
+    throw new Error("Supabase signed URL response was empty.");
+  }
+
+  const signedPath = (parsedBody as Record<string, unknown>).signedURL;
+  if (typeof signedPath !== "string" || signedPath.trim().length === 0) {
+    throw new Error("Supabase signed URL response missing signedURL.");
+  }
+
+  const absolute = signedPath.startsWith("http")
+    ? signedPath
+    : `${url}/storage/v1${signedPath.startsWith("/") ? "" : "/"}${signedPath}`;
+
+  return absolute;
 }
 
 function safeJsonParse(raw: string) {

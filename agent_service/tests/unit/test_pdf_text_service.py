@@ -104,6 +104,35 @@ class TestPdfTextService(unittest.TestCase):
         self.assertIn("--- File: spec.pdf ---", text)
         self.assertEqual(signals, sample_signals)
 
+    def test_extract_pdf_context_supports_storage_url_files(self):
+        req = RunAgentRequest(
+            assignment_uuid="abc-123",
+            payload={"title": "HW1"},
+            pdf_text="",
+            pdf_files=[
+                PdfFile(
+                    filename="spec.pdf",
+                    storage_url="https://example.invalid/signed-url",
+                )
+            ],
+        )
+
+        with patch(
+            "app.services.pdf_text_service._download_pdf_from_storage_url",
+            return_value=b"placeholder",
+        ) as mock_download, patch(
+            "app.services.pdf_text_service.extract_pdf_context_from_pdf_bytes",
+            return_value=("--- Page 1 (native) ---\nfrom storage", []),
+        ):
+            text, signals = extract_pdf_context(req)
+
+        self.assertIn("--- File: spec.pdf ---", text)
+        self.assertEqual(signals, [])
+        mock_download.assert_called_once_with(
+            "https://example.invalid/signed-url",
+            "spec.pdf",
+        )
+
     def test_score_visual_signal_boosts_question_tokens(self):
         q_score = _score_visual_signal("Q2", ["highlight"])
         plain_score = _score_visual_signal("overview paragraph", ["highlight"])

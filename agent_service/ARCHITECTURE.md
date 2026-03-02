@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The FastAPI agent service receives normalized assignment payloads (plus optional PDF content), orchestrates LLM generation, and returns a structured study guide response.
+The FastAPI agent service receives normalized assignment payloads (plus optional PDF content), orchestrates LLM generation, and returns a structured study guide response. In the current architecture, the preferred PDF path is object-storage URLs (`storage_url`) with optional legacy base64 fallback.
 
 ## Runtime Components
 
@@ -38,7 +38,13 @@ Both run endpoints share the same internal handler path through `handle_run_agen
 - `assignment_uuid?: string`
 - `payload: Dict[str, Any]` (required)
 - `pdf_text?: string`
-- `pdf_files?: List[{ filename, base64_data }]`
+- `pdf_files?: List[{ filename, storage_url?, base64_data?, file_sha256? }]`
+
+`pdf_files` behavior:
+
+- Preferred input: `storage_url` for each file (signed URL produced by webapp).
+- Compatibility fallback: `base64_data` remains accepted.
+- `file_sha256` is optional metadata and is not required for extraction.
 
 ## Response Contract
 
@@ -48,10 +54,10 @@ Both run endpoints share the same internal handler path through `handle_run_agen
 
 ## End-to-End Call Flow
 
-1. Web app forwards request to `POST /run-agent` (or v1 route).
+1. Web app forwards request to `POST /run-agent` (or v1 route). Upstream, webapp stores binary PDFs in object storage and deduplicates by hash before generating signed URLs.
 2. Route calls `run_agent_workflow()` from `services/run_agent_service.py`.
 3. Service logs request metadata and calls `extract_pdf_context()`.
-4. PDF service decodes `pdf_files[*].base64_data` (raw base64 and data-URL payloads).
+4. PDF service fetches `pdf_files[*].storage_url` when present, otherwise decodes `pdf_files[*].base64_data` (raw base64 and data-URL payloads).
 5. For each page, PDF service extracts native text via PyMuPDF (`fitz`).
 6. A page-quality heuristic classifies each page as either:
    - `native` (good text layer)
@@ -96,6 +102,9 @@ Both run endpoints share the same internal handler path through `handle_run_agen
 ## Configuration and Dependencies
 
 - Required env var: `NVIDIA_API_KEY`.
+- Optional env vars for storage URL ingestion safeguards:
+  - `PDF_FETCH_TIMEOUT_SECONDS` (default `15`)
+  - `PDF_FETCH_MAX_BYTES` (default `26214400`, 25MB)
 - Core dependencies: FastAPI, Pydantic, LangChain, NVIDIA LangChain endpoint client.
 - Required for PDF extraction: PyMuPDF (`pymupdf`).
 - Optional OCR dependencies: `pytesseract`, `pillow`, and a system Tesseract binary available on `PATH`.
@@ -105,6 +114,7 @@ Both run endpoints share the same internal handler path through `handle_run_agen
 
 - Missing `NVIDIA_API_KEY` raises runtime error.
 - PDF decode/extract failures are logged and skipped per file.
+- Storage URL fetch failures (HTTP/network/timeout/oversize) are logged and skipped per file.
 - OCR dependency/runtime failures are logged and only affect OCR-candidate pages; pipeline continues with native extraction output when available.
 - Visual-signal extraction failures are logged and skipped per page/file; text extraction and run generation continue.
 - Route wrapper catches unhandled workflow exceptions and returns HTTP 500.
