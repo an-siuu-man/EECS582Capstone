@@ -19,7 +19,7 @@
  */
 
 import type { Metadata } from "next";
-import { Quattrocento, Questrial } from "next/font/google";
+import { Nunito_Sans, Quattrocento } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 
@@ -29,7 +29,7 @@ const quattrocento = Quattrocento({
   variable: "--font-heading",
 });
 
-const questrial = Questrial({
+const nunitoSans = Nunito_Sans({
   weight: "400",
   subsets: ["latin"],
   variable: "--font-body",
@@ -47,7 +47,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${quattrocento.variable} ${questrial.variable} font-sans antialiased`}>
+      <body className={`${quattrocento.variable} ${nunitoSans.variable} font-sans antialiased`}>
         <ThemeProvider
           attribute="class"
           defaultTheme="system"

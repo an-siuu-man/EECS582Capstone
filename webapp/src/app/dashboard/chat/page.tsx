@@ -842,49 +842,45 @@ function DashboardChatPageContent() {
       initial={reduceMotion ? false : { opacity: 0, y: 12 }}
       animate={reduceMotion ? undefined : { opacity: 1, y: 0 }}
       transition={reduceMotion ? undefined : { duration: 0.45, ease: EASE_OUT }}
-      className="w-full space-y-6"
+      className="flex h-[calc(100dvh-7.75rem)] min-h-[480px] w-full flex-col gap-2 md:min-h-[560px]"
     >
       <motion.div
         initial={reduceMotion ? false : { opacity: 0, y: 8 }}
         animate={reduceMotion ? undefined : { opacity: 1, y: 0 }}
         transition={reduceMotion ? undefined : { duration: 0.35, ease: EASE_OUT, delay: 0.05 }}
-        className="relative flex flex-col gap-3 rounded-2xl border border-border/50 bg-card/60 p-4 backdrop-blur sm:flex-row sm:items-end sm:justify-between"
+        className="flex items-center justify-between gap-2 pb-1"
       >
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-brand-blue">
-            Dashboard Chat
-          </p>
-          <h1 className="text-3xl font-heading font-bold tracking-tight">Guide Workspace</h1>
-          <p className="text-muted-foreground">
-            The guide starts automatically after you click Generate Guide in the extension.
-          </p>
+        <div className="min-w-0 flex items-center gap-2">
+            <h1 className="text-lg font-heading font-medium tracking-tight">Session Chat</h1>
+            {effectiveSession ? (
+              <Badge
+                variant="outline"
+                className="w-fit border-brand-blue/30 bg-brand-blue/10 px-2 py-0.5 text-[10px] text-brand-blue"
+              >
+                {stageLabel(effectiveSession.stage)}
+              </Badge>
+            ) : null}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-1 sm:justify-end">
           <Button
             type="button"
-            variant="outline"
-            className="border-border/70 bg-background/70"
+            variant="primary"
+            size="default"
+            className="rounded-full px-4"
             onClick={() => router.push("/dashboard/chat")}
           >
             All Chats
           </Button>
           <Button
             type="button"
-            variant="outline"
-            className="border-border/70 bg-background/70"
+            variant="secondary"
+            size="default"
+            className="rounded-full px-4"
             onClick={() => setIsContextDialogOpen(true)}
             disabled={!payload}
           >
-            View Assignment Context
+            Chat Context
           </Button>
-          {effectiveSession ? (
-            <Badge
-              variant="outline"
-              className="w-fit border-brand-blue/40 bg-brand-blue/10 px-3 py-1.5 text-brand-blue"
-            >
-              {stageLabel(effectiveSession.stage)}
-            </Badge>
-          ) : null}
         </div>
       </motion.div>
 
@@ -892,19 +888,18 @@ function DashboardChatPageContent() {
         initial={reduceMotion ? false : { opacity: 0, y: 10 }}
         animate={reduceMotion ? undefined : { opacity: 1, y: 0 }}
         transition={reduceMotion ? undefined : { duration: 0.4, ease: EASE_OUT, delay: 0.1 }}
-        className="grid items-start gap-4"
+        className="min-h-0 flex flex-1"
       >
         <motion.div
           initial={reduceMotion ? false : { opacity: 0, x: 8 }}
           animate={reduceMotion ? undefined : { opacity: 1, x: 0 }}
           transition={reduceMotion ? undefined : { duration: 0.35, ease: EASE_OUT, delay: 0.18 }}
-          className="min-w-0"
+          className="min-h-0 min-w-0 flex flex-1"
         >
-          <Card className="flex h-[min(72vh,820px)] min-h-[500px] min-w-0 flex-col border-border/50 bg-card/90 shadow-[0_18px_45px_-28px_rgba(15,23,42,0.55)] backdrop-blur">
-          <CardContent className="flex min-h-0 flex-1 flex-col gap-3 p-4">
+          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
             <div ref={threadContainerRef} className="min-h-0 flex-1">
-              <ScrollArea className="h-full rounded-xl border border-border/60 bg-gradient-to-b from-muted/15 via-card to-card">
-                <div className="mx-auto min-w-0 w-full max-w-5xl space-y-3 p-4 sm:px-8 lg:px-10">
+              <ScrollArea className="h-full">
+                <div className="mx-auto min-w-0 w-full max-w-5xl space-y-3 px-3 pb-28 pt-2 sm:px-6 sm:pb-32 sm:pt-3 lg:px-8">
                 <AnimatePresence initial={false}>
                   {showProgressPanel && effectiveSession ? (
                     <motion.div
@@ -1039,30 +1034,44 @@ function DashboardChatPageContent() {
               </ScrollArea>
             </div>
 
-            <form onSubmit={handleSend} className="flex items-center gap-2">
-              <Input
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                onKeyDown={handleDraftKeyDown}
-                placeholder="Ask a follow-up question..."
-                className="h-11 rounded-full border border-border/60 bg-background/70 px-4 focus-visible:ring-0"
-              />
-              <Button
-                type="submit"
-                disabled={draft.trim().length === 0 || !canSendMessage}
-                className="h-11 w-11 rounded-full border-0 bg-transparent p-0 text-brand-blue transition-colors duration-200 hover:bg-brand-blue/12 hover:text-brand-blue/95"
-              >
-                {isSending ? (
-                  <LoaderCircle className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Send className="h-4 w-4" />
-                )}
-              </Button>
-            </form>
-
-            {resolvedErrorText ? <p className="text-[15px] text-destructive">{resolvedErrorText}</p> : null}
-          </CardContent>
-        </Card>
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-28 bg-gradient-to-t from-background via-background/95 to-transparent"
+            />
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 pb-2">
+              <div className="mx-auto w-full max-w-5xl px-3 sm:px-6 lg:px-8">
+                <div className="pointer-events-auto w-full">
+                  {resolvedErrorText ? (
+                    <p className="mb-2 px-3 text-[13px] text-destructive">{resolvedErrorText}</p>
+                  ) : null}
+                  <form
+                    onSubmit={handleSend}
+                    className="flex w-full items-center gap-2 rounded-full bg-background/92 px-2 py-2 shadow-[0_14px_32px_-20px_rgba(15,23,42,0.55)] backdrop-blur supports-[backdrop-filter]:bg-background/80"
+                  >
+                    <Input
+                      value={draft}
+                      onChange={(event) => setDraft(event.target.value)}
+                      onKeyDown={handleDraftKeyDown}
+                      placeholder="Ask a follow-up question..."
+                      className="h-10 rounded-full border-0 bg-transparent px-3 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                    />
+                    <Button
+                      type="submit"
+                      variant="ghost"
+                      disabled={draft.trim().length === 0 || !canSendMessage}
+                      className="h-9 w-9 rounded-full p-0 text-brand-blue transition-colors duration-200 hover:bg-brand-blue/10 hover:text-brand-blue"
+                    >
+                      {isSending ? (
+                        <LoaderCircle className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Send className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </form>
+                </div>
+              </div>
+            </div>
+          </div>
         </motion.div>
       </motion.div>
 

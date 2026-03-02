@@ -23,6 +23,7 @@ coverage/
 .env
 .env.local
 .env.*.local
+agent_service/myenv/
 
 # OS thumbnails / lockers
 Thumbs.db

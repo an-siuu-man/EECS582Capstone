@@ -52,12 +52,12 @@ export function Header() {
   }
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b px-4 md:px-6 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="flex items-center gap-4">
+    <header className="sticky top-0 z-30 flex h-12 items-center justify-between border-b border-border/60 bg-background/85 px-3 md:px-4 backdrop-blur supports-[backdrop-filter]:bg-background/70">
+      <div className="flex items-center gap-2">
         <Sheet open={open} onOpenChange={setOpen}>
           <SheetTrigger asChild>
-            <Button variant="ghost" size="icon" className="md:hidden">
-              <Menu className="h-5 w-5" />
+            <Button variant="secondary" size="icon-sm" className="rounded-full md:hidden">
+              <Menu className="h-4 w-4" />
               <span className="sr-only">Toggle Menu</span>
             </Button>
           </SheetTrigger>
@@ -69,17 +69,23 @@ export function Header() {
             <SidebarContent onClick={() => setOpen(false)} />
           </SheetContent>
         </Sheet>
-        
-        {/* Breadcrumb placeholder - in a real app this would be dynamic */}
-        <h2 className="text-lg font-heading font-semibold text-foreground hidden md:block">Dashboard</h2>
+
+        <p className="hidden text-[11px] font-medium tracking-[0.16em] text-muted-foreground uppercase md:block">
+          Workspace
+        </p>
       </div>
 
-      <div className="flex items-center gap-2 md:gap-4">
+      <div className="flex items-center gap-1.5 md:gap-2">
         <ModeToggle />
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" className="relative h-8 w-8 rounded-full" disabled={isSigningOut}>
+            <Button
+              variant="secondary"
+              size="icon-sm"
+              className="relative rounded-full"
+              disabled={isSigningOut}
+            >
               <Avatar className="h-8 w-8">
                 <AvatarFallback>{avatarFallback}</AvatarFallback>
               </Avatar>
