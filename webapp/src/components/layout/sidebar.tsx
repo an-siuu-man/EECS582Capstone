@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { useState } from "react"
 import { Home, FileText, BookOpen, LogOut, BrainCircuit, MessageSquare, PanelLeftClose, PanelLeftOpen } from "lucide-react"
 
@@ -21,6 +21,8 @@ interface SidebarContentProps {
   collapsed?: boolean
   onToggleCollapse?: () => void
   showCollapseToggle?: boolean
+  onSignOut?: () => void
+  isSigningOut?: boolean
 }
 
 export function SidebarContent({
@@ -29,6 +31,8 @@ export function SidebarContent({
   collapsed = false,
   onToggleCollapse,
   showCollapseToggle = false,
+  onSignOut,
+  isSigningOut = false,
 }: SidebarContentProps) {
   const pathname = usePathname()
   
@@ -36,8 +40,8 @@ export function SidebarContent({
     <div className={cn("flex flex-col h-full", className)}>
       <div
         className={cn(
-          "flex items-center gap-2 border-b p-4 transition-all duration-300",
-          collapsed ? "justify-between px-3" : "justify-between px-4"
+          "flex items-center border-b p-4 transition-all duration-300",
+          collapsed ? "justify-start gap-0 px-4" : "justify-between gap-2 px-4"
         )}
       >
         <div
@@ -60,7 +64,8 @@ export function SidebarContent({
             onClick={onToggleCollapse}
             className={cn(
               "shrink-0 transition-all duration-300",
-              "h-8 w-8"
+              "h-8 w-8",
+              collapsed ? "ml-0" : ""
             )}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
@@ -80,7 +85,7 @@ export function SidebarContent({
                 onClick={onClick}
                 className={cn(
                   "flex items-center rounded-md py-2 text-sm font-medium transition-all duration-300",
-                  collapsed ? "justify-center px-2" : "gap-3 px-3",
+                  collapsed ? "justify-start px-3" : "gap-3 px-3",
                   isActive
                     ? "bg-primary text-primary-foreground"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -101,13 +106,15 @@ export function SidebarContent({
         </nav>
       </div>
 
-      <div className="p-4 border-t">
+      <div className={cn("border-t", collapsed ? "p-3" : "p-4")}>
          <Button
             variant="ghost"
             className={cn(
               "w-full text-muted-foreground hover:text-destructive transition-all duration-300",
-              collapsed ? "justify-center px-2" : "justify-start gap-2"
+              collapsed ? "justify-start px-3" : "justify-start gap-2"
             )}
+            onClick={onSignOut}
+            disabled={isSigningOut}
          >
             <LogOut className="h-4 w-4" />
             <span
@@ -116,7 +123,7 @@ export function SidebarContent({
                 collapsed ? "max-w-0 -translate-x-1 opacity-0" : "max-w-[100px] translate-x-0 opacity-100"
               )}
             >
-              Log out
+              {isSigningOut ? "Logging out..." : "Log out"}
             </span>
          </Button>
       </div>
@@ -126,18 +133,38 @@ export function SidebarContent({
 
 export function Sidebar() {
   const [collapsed, setCollapsed] = useState(false)
+  const [isSigningOut, setIsSigningOut] = useState(false)
+  const router = useRouter()
+
+  async function handleSignOut() {
+    if (isSigningOut) return
+
+    setIsSigningOut(true)
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      })
+    } finally {
+      setIsSigningOut(false)
+      router.replace("/login")
+      router.refresh()
+    }
+  }
 
   return (
     <aside
       className={cn(
         "sticky top-0 hidden h-screen flex-col border-r bg-card transition-[width] duration-300 ease-out md:flex",
-        collapsed ? "w-20" : "w-64"
+        collapsed ? "w-16" : "w-64"
       )}
     >
-       <SidebarContent
+      <SidebarContent
          collapsed={collapsed}
          onToggleCollapse={() => setCollapsed((value) => !value)}
          showCollapseToggle
+         onSignOut={handleSignOut}
+         isSigningOut={isSigningOut}
        />
     </aside>
   )

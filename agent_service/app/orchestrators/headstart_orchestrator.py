@@ -25,7 +25,7 @@ import json
 import os
 import re
 import time
-from typing import Iterator, Optional
+from typing import Any, Iterator, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
@@ -492,3 +492,277 @@ def stream_headstart_agent_markdown(
     chunk_size = 900
     for start in range(0, len(markdown), chunk_size):
         yield markdown[start : start + chunk_size]
+
+SYSTEM_PROMPT_CHAT = """\
+You are an academic assistant helping a student with follow-up questions about an assignment.
+
+Use the provided assignment payload, generated guide, retrieval snippets, and prior chat context.
+
+Answer requirements:
+- Return MARKDOWN ONLY (no JSON and no code fences).
+- Be concise and actionable.
+- If relevant context is missing, explicitly say what is uncertain.
+- Prefer concrete next steps, checklists, or examples when useful.
+"""
+
+HUMAN_TEMPLATE_CHAT = """\
+Assignment payload:
+{payload}
+
+Generated assignment guide:
+{guide_markdown}
+
+Retrieved context snippets:
+{retrieval_context}
+
+Recent chat history:
+{chat_history}
+
+Student question:
+{user_message}
+"""
+
+MAX_CHAT_PAYLOAD_CHARS = 12000
+MAX_CHAT_GUIDE_CHARS = 32000
+MAX_CHAT_HISTORY_CHARS = 12000
+MAX_CHAT_RETRIEVAL_CHARS = 12000
+MAX_CHAT_USER_MESSAGE_CHARS = 4000
+MAX_CHAT_FIELD_CHARS = 2200
+MAX_CHAT_ARRAY_ITEMS = 20
+MAX_CHAT_OBJECT_KEYS = 40
+MAX_CHAT_OBJECT_DEPTH = 4
+CHAT_PAYLOAD_DROP_KEYS = {
+    "base64Data",
+    "base64_data",
+    "pdfAttachments",
+    "pdf_files",
+    "pdfFiles",
+    "pdfs",
+    "raw_payload",
+    "rawPayload",
+}
+BASE64_SAMPLE_PATTERN = re.compile(r"^[A-Za-z0-9+/=]+$")
+
+
+def _truncate_for_chat(text: str, max_chars: int) -> str:
+    if len(text) <= max_chars:
+        return text
+    omitted = len(text) - max_chars
+    return f"{text[:max_chars]}\n...[truncated {omitted} chars]"
+
+
+def _looks_like_base64_blob(text: str) -> bool:
+    compact = re.sub(r"\s+", "", text)
+    if len(compact) < 1200:
+        return False
+
+    sample = compact[:2000]
+    return bool(BASE64_SAMPLE_PATTERN.fullmatch(sample))
+
+
+def _sanitize_payload_value_for_chat(value: Any, depth: int = 0) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        if _looks_like_base64_blob(value):
+            return "[omitted binary/base64 content]"
+        return _truncate_for_chat(value, MAX_CHAT_FIELD_CHARS)
+    if isinstance(value, list):
+        cleaned = [
+            _sanitize_payload_value_for_chat(item, depth + 1)
+            for item in value[:MAX_CHAT_ARRAY_ITEMS]
+        ]
+        if len(value) > MAX_CHAT_ARRAY_ITEMS:
+            cleaned.append(f"... [{len(value) - MAX_CHAT_ARRAY_ITEMS} more items omitted]")
+        return cleaned
+    if isinstance(value, dict):
+        if depth >= MAX_CHAT_OBJECT_DEPTH:
+            return "[omitted nested object]"
+        out = {}
+        kept = 0
+        for key, entry in value.items():
+            key_str = str(key)
+            if key_str in CHAT_PAYLOAD_DROP_KEYS:
+                continue
+            if kept >= MAX_CHAT_OBJECT_KEYS:
+                out["_omitted_keys"] = f"{len(value) - kept} keys omitted"
+                break
+            out[key_str] = _sanitize_payload_value_for_chat(entry, depth + 1)
+            kept += 1
+        return out
+    return _truncate_for_chat(str(value), MAX_CHAT_FIELD_CHARS)
+
+
+def _sanitize_assignment_payload_for_chat(payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        return {}
+    cleaned = _sanitize_payload_value_for_chat(payload)
+    if isinstance(cleaned, dict):
+        return cleaned
+    return {}
+
+
+def _format_chat_history_for_prompt(chat_history: Optional[list[dict]]) -> str:
+    if not chat_history:
+        return "(none)"
+
+    lines = []
+    for item in chat_history[-8:]:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role", "unknown")).strip() or "unknown"
+        content = str(item.get("content", "")).strip()
+        if not content:
+            continue
+        content = _truncate_for_chat(content, 1800)
+        lines.append(f"- {role}: {content}")
+
+    return "\n".join(lines) if lines else "(none)"
+
+
+def _format_retrieval_context_for_prompt(retrieval_context: Optional[list[dict]]) -> str:
+    if not retrieval_context:
+        return "(none)"
+
+    lines = []
+    for item in retrieval_context[:20]:
+        if not isinstance(item, dict):
+            continue
+
+        text = str(item.get("text", "")).strip()
+        if not text:
+            continue
+        text = _truncate_for_chat(text, 900)
+
+        chunk_id = str(item.get("chunk_id", "?"))
+        source = str(item.get("source", "unknown"))
+        score = item.get("score", "?")
+        lines.append(
+            f"- [{source} | {chunk_id} | score={score}] {text}"
+        )
+
+    return "\n".join(lines) if lines else "(none)"
+
+
+def _build_followup_chat_chain(llm):
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", SYSTEM_PROMPT_CHAT),
+            ("human", HUMAN_TEMPLATE_CHAT),
+        ]
+    )
+    return prompt | llm
+
+
+def stream_headstart_chat_answer(
+    assignment_payload: dict,
+    guide_markdown: str,
+    chat_history: Optional[list[dict]] = None,
+    retrieval_context: Optional[list[dict]] = None,
+    user_message: str = "",
+) -> Iterator[str]:
+    """
+    Stream follow-up chat answer chunks from the model when provider streaming is available.
+    Falls back to single invoke chunking when needed.
+    """
+    api_key = os.getenv("NVIDIA_API_KEY")
+    if not api_key:
+        raise RuntimeError("NVIDIA_API_KEY is not set")
+
+    logger.info(
+        "Initializing follow-up chat LLM | model=%s temperature=%s max_tokens=%d",
+        MODEL_NAME,
+        TEMPERATURE,
+        MAX_OUTPUT_TOKENS,
+    )
+
+    llm = build_nvidia_chat_client(
+        model_name=MODEL_NAME,
+        temperature=TEMPERATURE,
+        max_tokens=MAX_OUTPUT_TOKENS,
+    )
+    chain = _build_followup_chat_chain(llm)
+
+    sanitized_payload = _sanitize_assignment_payload_for_chat(assignment_payload or {})
+    payload_str = _truncate_for_chat(
+        json.dumps(sanitized_payload, ensure_ascii=False),
+        MAX_CHAT_PAYLOAD_CHARS,
+    )
+    guide_markdown_str = _truncate_for_chat(
+        guide_markdown or "(no generated guide available)",
+        MAX_CHAT_GUIDE_CHARS,
+    )
+    chat_history_str = _truncate_for_chat(
+        _format_chat_history_for_prompt(chat_history),
+        MAX_CHAT_HISTORY_CHARS,
+    )
+    retrieval_context_str = _truncate_for_chat(
+        _format_retrieval_context_for_prompt(retrieval_context),
+        MAX_CHAT_RETRIEVAL_CHARS,
+    )
+    user_message_str = (user_message or "").strip()
+    if not user_message_str:
+        user_message_str = "Please summarize what I should do next."
+    user_message_str = _truncate_for_chat(user_message_str, MAX_CHAT_USER_MESSAGE_CHARS)
+
+    logger.info(
+        "Follow-up context sizes | payload=%d guide=%d history=%d retrieval=%d user=%d",
+        len(payload_str),
+        len(guide_markdown_str),
+        len(chat_history_str),
+        len(retrieval_context_str),
+        len(user_message_str),
+    )
+
+    inputs = {
+        "payload": payload_str,
+        "guide_markdown": guide_markdown_str,
+        "retrieval_context": retrieval_context_str,
+        "chat_history": chat_history_str,
+        "user_message": user_message_str,
+    }
+
+    has_streamed_content = False
+    streamed_text = ""
+    try:
+        stream_fn = getattr(chain, "stream", None)
+        if callable(stream_fn):
+            logger.info("Streaming follow-up chat response from provider")
+            for chunk in stream_fn(inputs):
+                chunk_text = _to_text(chunk)
+                if not chunk_text:
+                    continue
+
+                if chunk_text.startswith(streamed_text):
+                    delta = chunk_text[len(streamed_text) :]
+                else:
+                    delta = chunk_text
+
+                if not delta:
+                    continue
+
+                streamed_text += delta
+                has_streamed_content = True
+                yield delta
+    except Exception as exc:
+        logger.warning(
+            "Provider follow-up chat streaming failed; falling back to single invoke: %s",
+            repr(exc),
+        )
+        has_streamed_content = False
+        streamed_text = ""
+
+    if has_streamed_content:
+        return
+
+    logger.info("Using single invoke follow-up chat fallback")
+    result = chain.invoke(inputs)
+    content = _extract_markdown_payload(_to_text(result))
+    if not content:
+        raise RuntimeError("Model returned empty follow-up response.")
+
+    chunk_size = 900
+    for start in range(0, len(content), chunk_size):
+        yield content[start : start + chunk_size]

@@ -97,9 +97,9 @@
   --sidebar-accent-foreground: oklch(0.24 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
-  --thinking-shine-soft: oklch(0.5 0 0 / 0.28);
-  --thinking-shine-core: oklch(0.7 0 0 / 0.96);
-  --thinking-shine-tail: oklch(0.56 0 0 / 0.42);
+  --thinking-shine-soft: oklch(0.38 0.01 260 / 0.48);
+  --thinking-shine-core: oklch(0.96 0.03 260 / 1);
+  --thinking-shine-tail: oklch(0.46 0.015 260 / 0.58);
 }
 
 .dark {

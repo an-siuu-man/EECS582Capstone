@@ -84,6 +84,27 @@ erDiagram
     TIMESTAMPTZ created_at
   }
 
+  CHAT_SESSIONS {
+    UUID id PK
+    UUID user_id FK
+    UUID assignment_uuid FK
+    TEXT title
+    TEXT status
+    TIMESTAMPTZ created_at
+    TIMESTAMPTZ updated_at
+  }
+
+  CHAT_MESSAGES {
+    UUID id PK
+    UUID session_id FK
+    INT message_index
+    TEXT sender_role
+    TEXT content_text
+    TEXT content_format
+    JSONB metadata
+    TIMESTAMPTZ created_at
+  }
+
   HEADSTART_RUNS {
     UUID id PK
     UUID assignment_uuid FK
@@ -160,6 +181,9 @@ erDiagram
   COURSES ||--o{ ASSIGNMENTS : contains
   ASSIGNMENTS ||--o{ ASSIGNMENT_SNAPSHOTS : versioned_as
   ASSIGNMENT_SNAPSHOTS ||--o{ ASSIGNMENT_INGESTS : ingested_as
+  AUTH_USERS ||--o{ CHAT_SESSIONS : owns
+  ASSIGNMENT_INGESTS ||--o{ CHAT_SESSIONS : context_for
+  CHAT_SESSIONS ||--o{ CHAT_MESSAGES : contains
   ASSIGNMENT_INGESTS ||--o{ HEADSTART_RUNS : run_attempts
   HEADSTART_RUNS ||--o{ RUN_PDF_FILES : attached_files
   HEADSTART_RUNS ||--|| HEADSTART_DOCUMENTS : produces

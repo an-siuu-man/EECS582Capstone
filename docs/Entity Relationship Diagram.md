@@ -7,7 +7,7 @@ This schema aligns with:
 - `internal/architecture/03_agent_service_contracts.md`
 
 It is designed for the real pipeline:
-`Canvas extraction -> ingest assignment -> run agent -> persist structured output`.
+`Canvas extraction -> ingest assignment -> run agent -> persist structured output + chat history`.
 
 ## Scope and Design Rules
 
@@ -29,6 +29,9 @@ It is designed for the real pipeline:
 | `courses` | 1 to many | `assignments` |
 | `assignments` | 1 to many | `assignment_snapshots` |
 | `assignment_snapshots` | 1 to many | `assignment_ingests` |
+| `auth.users` | 1 to many | `chat_sessions` |
+| `assignment_ingests` | 1 to many | `chat_sessions` |
+| `chat_sessions` | 1 to many | `chat_messages` |
 | `assignment_ingests` | 1 to many | `headstart_runs` |
 | `headstart_runs` | 1 to many | `run_pdf_files` |
 | `headstart_runs` | 1 to 1 | `headstart_documents` |
@@ -133,7 +136,31 @@ CREATE TABLE public.assignment_ingests (
   UNIQUE (request_id)
 );
 
--- 8) Run attempts (async-ready)
+-- 8) Persisted chatbot sessions by user and assignment context
+CREATE TABLE public.chat_sessions (
+  id uuid PRIMARY KEY DEFAULT extensions.gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  assignment_uuid uuid NOT NULL REFERENCES public.assignment_ingests(assignment_uuid) ON DELETE CASCADE,
+  title text,
+  status text NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'completed', 'failed', 'archived')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- 9) Ordered messages inside each chat session
+CREATE TABLE public.chat_messages (
+  id uuid PRIMARY KEY DEFAULT extensions.gen_random_uuid(),
+  session_id uuid NOT NULL REFERENCES public.chat_sessions(id) ON DELETE CASCADE,
+  message_index integer NOT NULL CHECK (message_index >= 1),
+  sender_role text NOT NULL CHECK (sender_role IN ('user', 'assistant', 'system')),
+  content_text text NOT NULL,
+  content_format text NOT NULL DEFAULT 'markdown' CHECK (content_format IN ('plain_text', 'markdown', 'json')),
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (session_id, message_index)
+);
+
+-- 10) Run attempts (async-ready)
 CREATE TABLE public.headstart_runs (
   id uuid PRIMARY KEY DEFAULT extensions.gen_random_uuid(),
   assignment_uuid uuid NOT NULL REFERENCES public.assignment_ingests(assignment_uuid) ON DELETE CASCADE,
@@ -150,7 +177,7 @@ CREATE TABLE public.headstart_runs (
   UNIQUE (assignment_uuid, attempt_no)
 );
 
--- 9) Per-run attached PDF files (input/audit)
+-- 11) Per-run attached PDF files (input/audit)
 CREATE TABLE public.run_pdf_files (
   id uuid PRIMARY KEY DEFAULT extensions.gen_random_uuid(),
   run_id uuid NOT NULL REFERENCES public.headstart_runs(id) ON DELETE CASCADE,
@@ -164,7 +191,7 @@ CREATE TABLE public.run_pdf_files (
   UNIQUE (run_id, filename, file_sha256)
 );
 
--- 10) Top-level agent output (1 document per successful run)
+-- 12) Top-level agent output (1 document per successful run)
 CREATE TABLE public.headstart_documents (
   id uuid PRIMARY KEY DEFAULT extensions.gen_random_uuid(),
   run_id uuid NOT NULL UNIQUE REFERENCES public.headstart_runs(id) ON DELETE CASCADE,
@@ -174,7 +201,7 @@ CREATE TABLE public.headstart_documents (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
--- 11) Normalized list outputs from RunAgentResponse
+-- 13) Normalized list outputs from RunAgentResponse
 CREATE TABLE public.doc_key_requirements (
   doc_id uuid NOT NULL REFERENCES public.headstart_documents(id) ON DELETE CASCADE,
   position integer NOT NULL CHECK (position >= 1),
@@ -224,6 +251,8 @@ For each table, every non-trivial functional dependency has a determinant that i
 - `assignments`: `id` key; natural candidate key `(course_id, provider_assignment_id)`.
 - `assignment_snapshots`: `id` key; alternate candidate key `(assignment_id, content_hash)`.
 - `assignment_ingests`: `assignment_uuid` key.
+- `chat_sessions`: `id` key.
+- `chat_messages`: `id` key; alternate candidate key `(session_id, message_index)`.
 - `headstart_runs`: `id` key; alternate candidate key `(assignment_uuid, attempt_no)`.
 - `run_pdf_files`: `id` key; alternate candidate key `(run_id, filename, file_sha256)`.
 - `headstart_documents`: `id` key; alternate candidate key `run_id` (1:1).
@@ -234,5 +263,6 @@ No table stores attributes that are transitively determined by another non-key a
 ## Implementation Notes
 
 - Keep `assignment_uuid` generated at ingest time to preserve current extension/webapp contract.
+- Persist chat conversations in `chat_sessions` and `chat_messages` so user and assistant turns are durable beyond in-memory session TTL.
 - Persist `assignment_snapshots` so each run is reproducible against the exact captured assignment state.
 - The schema is async-ready: `headstart_runs.status` can represent queued/running/failed flows without redesign.

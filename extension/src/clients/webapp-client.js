@@ -12,6 +12,7 @@ export async function ingestAssignment(payload, baseUrl) {
   const backendBaseUrl = toBaseUrl(baseUrl);
   const res = await fetch(`${backendBaseUrl}/api/ingest-assignment`, {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
@@ -24,12 +25,18 @@ export async function ingestAssignment(payload, baseUrl) {
   return res.json();
 }
 
-export async function createChatSession({ payload }, baseUrl) {
+export async function createChatSession({ payload, userId }, baseUrl) {
   const backendBaseUrl = toBaseUrl(baseUrl);
+  const body = { payload };
+  if (typeof userId === "string" && userId.trim()) {
+    body.user_id = userId.trim();
+  }
+
   const res = await fetch(`${backendBaseUrl}/api/chat-session`, {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ payload }),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
@@ -45,6 +52,7 @@ export async function runAgent({ assignmentUuid, payload, pdfFiles }, baseUrl) {
 
   const res = await fetch(`${backendBaseUrl}/api/run-agent`, {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       assignment_uuid: assignmentUuid,

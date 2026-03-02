@@ -1,89 +1,111 @@
-import { NextResponse } from "next/server"
-import { getChatSession, serializeChatSession } from "@/lib/chat-session-store"
+import { NextResponse } from "next/server";
+import {
+  assertSessionOwnership,
+  getPersistedSessionSnapshot,
+} from "@/lib/chat-repository";
+import { getRuntimeSession } from "@/lib/chat-runtime-store";
+import { buildSessionDto } from "@/lib/chat-types";
+import { applyAuthCookies, resolveRequestUser } from "@/lib/auth/session";
 
-export const runtime = "nodejs"
+export const runtime = "nodejs";
 
-const DEFAULT_WAIT_MS = 25000
-const MIN_WAIT_MS = 0
-const MAX_WAIT_MS = 30000
+const DEFAULT_WAIT_MS = 25000;
+const MIN_WAIT_MS = 0;
+const MAX_WAIT_MS = 30000;
 
 function sleep(ms: number) {
   return new Promise((resolve) => {
-    setTimeout(resolve, ms)
-  })
+    setTimeout(resolve, ms);
+  });
 }
 
 function toBoundedWaitMs(rawValue: string | null) {
-  const parsed = Number(rawValue)
-  if (!Number.isFinite(parsed)) return DEFAULT_WAIT_MS
-  return Math.min(MAX_WAIT_MS, Math.max(MIN_WAIT_MS, Math.floor(parsed)))
+  const parsed = Number(rawValue);
+  if (!Number.isFinite(parsed)) return DEFAULT_WAIT_MS;
+  return Math.min(MAX_WAIT_MS, Math.max(MIN_WAIT_MS, Math.floor(parsed)));
 }
 
 function toSinceEpoch(rawValue: string | null) {
-  const parsed = Number(rawValue)
-  if (!Number.isFinite(parsed) || parsed <= 0) return null
-  return Math.floor(parsed)
+  const parsed = Number(rawValue);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Math.floor(parsed);
 }
 
 function isTerminalStatus(status: string) {
-  return status === "completed" || status === "failed"
+  return status === "completed" || status === "failed" || status === "archived";
 }
 
-async function waitForSessionChange(
-  sessionId: string,
-  sinceEpoch: number,
-  waitMs: number
-) {
-  const startedAt = Date.now()
-  let session = getChatSession(sessionId)
-
-  while (session && Date.now() - startedAt < waitMs) {
-    if (session.updatedAt > sinceEpoch || isTerminalStatus(session.status)) {
-      return session
-    }
-
-    await sleep(300)
-    session = getChatSession(sessionId)
-  }
-
-  return session
+async function loadSessionDto(sessionId: string) {
+  const snapshot = await getPersistedSessionSnapshot(sessionId);
+  if (!snapshot) return null;
+  const runtime = getRuntimeSession(sessionId);
+  return buildSessionDto(snapshot, runtime);
 }
 
 export async function GET(
   req: Request,
-  { params }: { params: Promise<{ sessionId: string }> }
+  { params }: { params: Promise<{ sessionId: string }> },
 ) {
-  const { sessionId } = await params
-  const url = new URL(req.url)
-  const sinceEpoch = toSinceEpoch(url.searchParams.get("since"))
-  const waitMs = toBoundedWaitMs(url.searchParams.get("wait_ms"))
+  const { sessionId } = await params;
+  const resolvedUser = await resolveRequestUser(req);
+  const userId = resolvedUser?.user.id ?? "";
 
-  let session = getChatSession(sessionId)
+  if (!userId) {
+    return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+  }
+
+  const ownedSession = await assertSessionOwnership(sessionId, userId);
+  if (!ownedSession) {
+    return NextResponse.json(
+      { error: "session not found or expired" },
+      { status: 404 },
+    );
+  }
+
+  const url = new URL(req.url);
+  const sinceEpoch = toSinceEpoch(url.searchParams.get("since"));
+  const waitMs = toBoundedWaitMs(url.searchParams.get("wait_ms"));
+
+  let session = await loadSessionDto(sessionId);
   if (!session) {
     return NextResponse.json(
       { error: "session not found or expired" },
-      { status: 404 }
-    )
+      { status: 404 },
+    );
   }
 
   if (
     sinceEpoch &&
     waitMs > 0 &&
-    session.updatedAt <= sinceEpoch &&
+    session.updated_at <= sinceEpoch &&
     !isTerminalStatus(session.status)
   ) {
-    session = await waitForSessionChange(sessionId, sinceEpoch, waitMs)
-    if (!session) {
-      return NextResponse.json(
-        { error: "session not found or expired" },
-        { status: 404 }
-      )
+    const startedAt = Date.now();
+
+    while (Date.now() - startedAt < waitMs) {
+      await sleep(300);
+      const next = await loadSessionDto(sessionId);
+      if (!next) {
+        return NextResponse.json(
+          { error: "session not found or expired" },
+          { status: 404 },
+        );
+      }
+
+      session = next;
+      if (session.updated_at > sinceEpoch || isTerminalStatus(session.status)) {
+        break;
+      }
     }
 
-    if (session.updatedAt <= sinceEpoch && !isTerminalStatus(session.status)) {
-      return new NextResponse(null, { status: 204 })
+    if (session.updated_at <= sinceEpoch && !isTerminalStatus(session.status)) {
+      return new NextResponse(null, { status: 204 });
     }
   }
 
-  return NextResponse.json(serializeChatSession(session))
+  const response = NextResponse.json(session);
+  if (resolvedUser?.refreshedSession) {
+    applyAuthCookies(response, resolvedUser.refreshedSession);
+  }
+  return response;
 }
