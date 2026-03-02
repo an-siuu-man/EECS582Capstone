@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useEffect, useState, type FormEvent } from "react"
+import { motion, useReducedMotion } from "framer-motion"
 import { BrainCircuit } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -19,6 +20,7 @@ import { Label } from "@/components/ui/label"
 
 export default function LoginPage() {
   const router = useRouter()
+  const reduceMotion = useReducedMotion()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -88,22 +90,45 @@ export default function LoginPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted/40 px-4">
-      <Link
-        href="/"
-        className="absolute left-4 top-4 flex items-center gap-2 text-lg font-heading font-bold md:left-8 md:top-8"
+      <motion.div
+        initial={reduceMotion ? false : { opacity: 0, y: -8 }}
+        animate={reduceMotion ? undefined : { opacity: 1, y: 0 }}
+        transition={reduceMotion ? undefined : { duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
       >
-        <BrainCircuit className="h-6 w-6" />
-        <span>Headstart AI</span>
-      </Link>
-      <Card className="w-full max-w-sm">
-        <CardHeader>
-          <CardTitle className="text-2xl">Login</CardTitle>
-          <CardDescription>
-            Enter your email below to login to your account.
-          </CardDescription>
-        </CardHeader>
-        <form onSubmit={handleSubmit}>
-          <CardContent className="grid gap-4">
+        <Link
+          href="/"
+          className="absolute left-4 top-4 flex items-center gap-2 text-lg font-heading font-bold md:left-8 md:top-8"
+        >
+          <BrainCircuit className="h-6 w-6" />
+          <span>Headstart AI</span>
+        </Link>
+      </motion.div>
+      <motion.div
+        initial={reduceMotion ? false : { opacity: 0, y: 14, scale: 0.98 }}
+        animate={reduceMotion ? undefined : { opacity: 1, y: 0, scale: 1 }}
+        transition={reduceMotion ? undefined : { duration: 0.42, ease: [0.22, 1, 0.36, 1], delay: 0.05 }}
+        className="w-full max-w-sm"
+      >
+        <Card className="w-full">
+          <motion.div
+            initial={reduceMotion ? false : { opacity: 0, y: 6 }}
+            animate={reduceMotion ? undefined : { opacity: 1, y: 0 }}
+            transition={reduceMotion ? undefined : { duration: 0.32, ease: [0.22, 1, 0.36, 1], delay: 0.1 }}
+          >
+            <CardHeader>
+              <CardTitle className="text-2xl">Login</CardTitle>
+              <CardDescription>
+                Enter your email below to login to your account.
+              </CardDescription>
+            </CardHeader>
+          </motion.div>
+          <motion.form
+            onSubmit={handleSubmit}
+            initial={reduceMotion ? false : { opacity: 0, y: 8 }}
+            animate={reduceMotion ? undefined : { opacity: 1, y: 0 }}
+            transition={reduceMotion ? undefined : { duration: 0.34, ease: [0.22, 1, 0.36, 1], delay: 0.14 }}
+          >
+          <CardContent className="grid gap-4 pb-1">
             <div className="grid gap-2">
               <Label htmlFor="email">Email</Label>
               <Input
@@ -133,7 +158,7 @@ export default function LoginPage() {
               <p className="text-sm text-destructive">{errorText}</p>
             ) : null}
           </CardContent>
-          <CardFooter className="flex flex-col gap-4">
+          <CardFooter className="flex flex-col gap-3 pt-2">
             <Button className="w-full" disabled={isSubmitting}>
               {isSubmitting ? "Signing in..." : "Sign in"}
             </Button>
@@ -144,8 +169,9 @@ export default function LoginPage() {
               </Link>
             </div>
           </CardFooter>
-        </form>
-      </Card>
+          </motion.form>
+        </Card>
+      </motion.div>
     </div>
   )
 }

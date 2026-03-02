@@ -52,7 +52,11 @@ const item = {
 }
 
 function greeting() {
-  const hour = new Date().getHours()
+  return "Welcome"
+}
+
+function greetingForHour(hour: number) {
+  if (hour >= 23 || hour < 3) return "Burning the midnight oil"
   if (hour < 12) return "Good morning"
   if (hour < 18) return "Good afternoon"
   return "Good evening"
@@ -71,6 +75,12 @@ function guideTone(status: DashboardGuide["status"]) {
   return "border-amber-200/80 bg-amber-50 text-amber-700"
 }
 
+function dueTone(isOverdue: boolean) {
+  return isOverdue
+    ? "border-red-200/80 bg-red-50 text-red-700 dark:border-red-400/35 dark:bg-red-500/12 dark:text-red-200"
+    : "border-emerald-200/80 bg-emerald-50 text-emerald-700 dark:border-emerald-400/35 dark:bg-emerald-500/12 dark:text-emerald-200"
+}
+
 function parseIsoDate(value: string | null | undefined) {
   if (!value) return null
   const date = new Date(value)
@@ -87,6 +97,7 @@ function parseEpochDate(value: number) {
 export default function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [timeGreeting, setTimeGreeting] = useState(greeting())
   const { user: authUser } = useAuthUser()
 
   useEffect(() => {
@@ -131,10 +142,23 @@ export default function Dashboard() {
     }
   }, [])
 
+  useEffect(() => {
+    const updateGreeting = () => {
+      const hour = new Date().getHours()
+      setTimeGreeting(greetingForHour(hour))
+    }
+
+    updateGreeting()
+    const timer = window.setInterval(updateGreeting, 60_000)
+    return () => {
+      window.clearInterval(timer)
+    }
+  }, [])
+
   if (!data && !loadError) {
     return (
       <div className="space-y-4">
-        <Card className="h-32 animate-pulse bg-muted/30" />
+        <Card className="h-14 animate-pulse bg-muted/30" />
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
           <Card className="h-[420px] animate-pulse bg-muted/30" />
           <Card className="h-[420px] animate-pulse bg-muted/30" />
@@ -150,34 +174,25 @@ export default function Dashboard() {
   const firstName = (authUser?.displayName || "Student").split(" ")[0]
 
   return (
-    <motion.div variants={container} initial="hidden" animate="show" className="space-y-5">
+    <motion.div variants={container} initial="hidden" animate="show" className="space-y-4">
       <motion.div variants={item}>
-        <Card className="border-border/60 bg-card/85 shadow-[0_12px_34px_-22px_rgba(15,23,42,0.45)]">
-          <CardContent className="flex flex-col gap-4 p-5 md:flex-row md:items-end md:justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-blue">
-                Dashboard
-              </p>
-              <h2 className="text-3xl font-heading font-bold tracking-tight">
-                {greeting()}, {firstName}
-              </h2>
-              <p className="mt-1 text-muted-foreground">
-                Live data from your saved assignment sessions and generated guides.
-              </p>
+        <Card className="border-border/55 bg-card/70 shadow-[0_10px_24px_-24px_rgba(15,23,42,0.55)]">
+          <CardContent className="flex min-h-0 flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 py-2.5">
+            <h2 className="text-base font-heading font-medium tracking-tight sm:text-lg">
+              {timeGreeting}, {firstName}
+            </h2>
+            <div className="flex items-center gap-1.5">
+              <Badge variant="outline" className="border-border/55 bg-background/65 px-2 py-0.5 text-[11px]">
+                Assignments {dashboardData.upcomingAssignments.length}
+              </Badge>
+              <Badge variant="outline" className="border-border/55 bg-background/65 px-2 py-0.5 text-[11px]">
+                Ready {readyGuides}
+              </Badge>
               {loadError ? (
-                <p className="mt-1 text-sm text-destructive">
-                  Unable to refresh dashboard data right now.
-                </p>
+                <Badge variant="outline" className="border-destructive/40 bg-destructive/10 px-2 py-0.5 text-[11px] text-destructive">
+                  Sync issue
+                </Badge>
               ) : null}
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="outline" className="border-border/70 bg-background/80 px-3 py-1.5">
-                Assignments: {dashboardData.upcomingAssignments.length}
-              </Badge>
-              <Badge variant="outline" className="border-border/70 bg-background/80 px-3 py-1.5">
-                Guides ready: {readyGuides}
-              </Badge>
             </div>
           </CardContent>
         </Card>
@@ -202,14 +217,16 @@ export default function Dashboard() {
               </Button>
             </div>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent>
             {dashboardData.upcomingAssignments.length === 0 ? (
               <div className="rounded-xl border border-dashed border-border/80 p-6 text-center text-sm text-muted-foreground">
                 No assignment context available yet.
               </div>
             ) : (
-              dashboardData.upcomingAssignments.map((assignment) => {
-                const dueAt = parseIsoDate(assignment.due_at_iso)
+              <div className="max-h-[calc(3*118px+1.5rem)] space-y-3 overflow-y-auto pr-2">
+                {dashboardData.upcomingAssignments.map((assignment) => {
+                    const dueAt = parseIsoDate(assignment.due_at_iso)
+                    const isOverdue = dueAt ? dueAt.getTime() < Date.now() : false
 
                 return (
                   <Link
@@ -217,7 +234,7 @@ export default function Dashboard() {
                     href={`/dashboard/chat?session=${encodeURIComponent(
                       assignment.latest_session_id,
                     )}`}
-                    className="group block rounded-xl border border-border/70 bg-background/70 p-4 shadow-[0_10px_26px_-20px_rgba(15,23,42,0.48)] transition-all duration-200 hover:-translate-y-0.5 hover:border-border hover:shadow-[0_18px_32px_-22px_rgba(15,23,42,0.55)]"
+                    className="group block min-h-[118px] rounded-xl border border-border/70 bg-background/70 p-4 shadow-[0_10px_26px_-20px_rgba(15,23,42,0.48)] transition-all duration-200 hover:-translate-y-0.5 hover:border-border hover:shadow-[0_18px_32px_-22px_rgba(15,23,42,0.55)]"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div>
@@ -237,14 +254,21 @@ export default function Dashboard() {
                     </div>
 
                     {dueAt ? (
-                      <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
+                      <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
                         <span className="inline-flex items-center gap-1.5 text-muted-foreground">
                           <CalendarDays className="h-4 w-4" />
-                          {format(dueAt, "EEE, MMM d • h:mm a")}
+                          {format(dueAt, "EEE, MMM d - h:mm a")}
                         </span>
-                        <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-                          <Clock className="h-4 w-4" />
-                          {formatDistanceToNow(dueAt, { addSuffix: true })}
+                        <span
+                          className={cn(
+                            "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium",
+                            dueTone(isOverdue),
+                          )}
+                        >
+                          <Clock className="h-3.5 w-3.5" />
+                          {isOverdue
+                            ? `Overdue by ${formatDistanceToNow(dueAt)}`
+                            : `Due in ${formatDistanceToNow(dueAt)}`}
                         </span>
                       </div>
                     ) : (
@@ -255,7 +279,8 @@ export default function Dashboard() {
                     )}
                   </Link>
                 )
-              })
+                })}
+              </div>
             )}
           </CardContent>
         </Card>
@@ -275,20 +300,21 @@ export default function Dashboard() {
               </Button>
             </div>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent>
             {dashboardData.generatedGuides.length === 0 ? (
               <div className="rounded-xl border border-dashed border-border/80 p-6 text-center text-sm text-muted-foreground">
                 No guides generated yet.
               </div>
             ) : (
-              dashboardData.generatedGuides.map((guide) => {
-                const generatedAt = parseEpochDate(guide.updated_at)
-                return (
-                  <Link
-                    key={guide.id}
-                    href={`/dashboard/chat?session=${encodeURIComponent(guide.session_id)}`}
-                    className="group block rounded-xl border border-border/70 bg-background/70 p-4 shadow-[0_10px_26px_-20px_rgba(15,23,42,0.48)] transition-all duration-200 hover:-translate-y-0.5 hover:border-border hover:shadow-[0_18px_32px_-22px_rgba(15,23,42,0.55)]"
-                  >
+              <div className="max-h-[calc(3*118px+1.5rem)] space-y-3 overflow-y-auto pr-2">
+                {dashboardData.generatedGuides.map((guide) => {
+                    const generatedAt = parseEpochDate(guide.updated_at)
+                    return (
+                      <Link
+                        key={guide.id}
+                        href={`/dashboard/chat?session=${encodeURIComponent(guide.session_id)}`}
+                        className="group block min-h-[118px] rounded-xl border border-border/70 bg-background/70 p-4 shadow-[0_10px_26px_-20px_rgba(15,23,42,0.48)] transition-all duration-200 hover:-translate-y-0.5 hover:border-border hover:shadow-[0_18px_32px_-22px_rgba(15,23,42,0.55)]"
+                      >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="line-clamp-1 font-medium text-foreground group-hover:text-brand-blue">
@@ -312,9 +338,10 @@ export default function Dashboard() {
                         ? `Updated ${formatDistanceToNow(generatedAt, { addSuffix: true })}`
                         : "Recently updated"}
                     </div>
-                  </Link>
-                )
-              })
+                      </Link>
+                    )
+                })}
+              </div>
             )}
           </CardContent>
         </Card>
@@ -322,3 +349,4 @@ export default function Dashboard() {
     </motion.div>
   )
 }
+
