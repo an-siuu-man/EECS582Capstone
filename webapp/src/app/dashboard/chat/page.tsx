@@ -1,6 +1,6 @@
 "use client"
 
-import { type FormEvent, Suspense, useEffect, useMemo, useRef, useState } from "react"
+import { type FormEvent, type KeyboardEvent as ReactKeyboardEvent, Suspense, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { format } from "date-fns"
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion"
@@ -622,10 +622,8 @@ function DashboardChatPageContent() {
         initial={reduceMotion ? false : { opacity: 0, y: 12 }}
         animate={reduceMotion ? undefined : { opacity: 1, y: 0 }}
         transition={reduceMotion ? undefined : { duration: 0.45, ease: EASE_OUT }}
-        className="relative w-full space-y-6 overflow-hidden rounded-3xl border border-border/60 bg-gradient-to-b from-background via-background to-muted/20 p-4 shadow-[0_30px_90px_-45px_rgba(2,6,23,0.6)] md:p-6"
+        className="w-full space-y-6"
       >
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_70%_at_50%_-5%,rgba(148,163,184,0.12),transparent_62%),radial-gradient(120%_70%_at_50%_110%,rgba(100,116,139,0.08),transparent_68%)]" />
-
         <motion.div
           initial={reduceMotion ? false : { opacity: 0, y: 8 }}
           animate={reduceMotion ? undefined : { opacity: 1, y: 0 }}
@@ -749,15 +747,23 @@ function DashboardChatPageContent() {
     }
   }
 
+  function handleDraftKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key !== "Enter") return
+    if (event.nativeEvent.isComposing) return
+    if (!draft.trim()) return
+    if (!canSendMessage || isSending) return
+
+    event.preventDefault()
+    event.currentTarget.form?.requestSubmit()
+  }
+
   return (
     <motion.div
       initial={reduceMotion ? false : { opacity: 0, y: 12 }}
       animate={reduceMotion ? undefined : { opacity: 1, y: 0 }}
       transition={reduceMotion ? undefined : { duration: 0.45, ease: EASE_OUT }}
-      className="relative w-full space-y-6 overflow-hidden rounded-3xl border border-border/60 bg-gradient-to-b from-background via-background to-muted/20 p-4 shadow-[0_30px_90px_-45px_rgba(2,6,23,0.6)] md:p-6"
+      className="w-full space-y-6"
     >
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_70%_at_50%_-5%,rgba(148,163,184,0.12),transparent_62%),radial-gradient(120%_70%_at_50%_110%,rgba(100,116,139,0.08),transparent_68%)]" />
-
       <motion.div
         initial={reduceMotion ? false : { opacity: 0, y: 8 }}
         animate={reduceMotion ? undefined : { opacity: 1, y: 0 }}
@@ -953,14 +959,19 @@ function DashboardChatPageContent() {
               </ScrollArea>
             </div>
 
-            <form onSubmit={handleSend} className="flex items-center gap-2 rounded-xl border border-border/60 bg-muted/20 p-2">
+            <form onSubmit={handleSend} className="flex items-center gap-2">
               <Input
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={handleDraftKeyDown}
                 placeholder="Ask a follow-up question..."
-                className="border-transparent bg-transparent focus-visible:ring-0"
+                className="h-11 rounded-full border border-border/60 bg-background/70 px-4 focus-visible:ring-0"
               />
-              <Button type="submit" disabled={draft.trim().length === 0 || !canSendMessage} className="rounded-lg bg-brand-blue text-primary-foreground hover:bg-brand-blue/90">
+              <Button
+                type="submit"
+                disabled={draft.trim().length === 0 || !canSendMessage}
+                className="h-11 rounded-full border-0 bg-brand-blue px-4 text-primary-foreground transition-all duration-200 hover:bg-brand-blue/90 hover:shadow-[0_0_0_1px_rgba(255,255,255,0.06)_inset]"
+              >
                 {isSending ? (
                   <LoaderCircle className="h-4 w-4 animate-spin" />
                 ) : (
