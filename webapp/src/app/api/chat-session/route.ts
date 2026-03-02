@@ -1,44 +1,65 @@
-/**
- * Artifact: webapp/src/app/api/chat-session/route.ts
- * Purpose: Creates an in-memory chat session for an assignment payload and starts asynchronous agent run orchestration.
- * Author: Ansuman Sharma
- * Created: 2026-03-01
- * Revised:
- * - 2026-03-01: Added standardized file-level prologue metadata and interface contracts. (Ansuman Sharma)
- * Preconditions:
- * - Executed in Next.js Node.js runtime with chat session store and runner modules available.
- * Inputs:
- * - Acceptable: HTTP POST JSON body containing `payload` as an object.
- * - Unacceptable: Missing `payload`, non-object payload values, or malformed JSON bodies.
- * Postconditions:
- * - On valid input, a chat session is created, background run execution is started, and session DTO is returned.
- * - On invalid input, a 400 JSON error response is returned.
- * Returns:
- * - HTTP JSON response containing serialized chat session state or validation error object.
- * Errors/Exceptions:
- * - Unhandled parsing/runtime failures may surface as route-level errors from Next.js runtime.
- */
+import { NextResponse } from "next/server";
+import { ensureRuntimeSession, getRuntimeSession } from "@/lib/chat-runtime-store";
+import {
+  createPersistedChatSession,
+  getPersistedSessionSnapshot,
+} from "@/lib/chat-repository";
+import { startChatSessionRun } from "@/lib/chat-session-runner";
+import { buildSessionDto } from "@/lib/chat-types";
 
-import { NextResponse } from "next/server"
-import { createChatSession, serializeChatSession } from "@/lib/chat-session-store"
-import { startChatSessionRun } from "@/lib/chat-session-runner"
-
-export const runtime = "nodejs"
+export const runtime = "nodejs";
 
 export async function POST(req: Request) {
-  const body = await req.json()
-  const payload = body?.payload
+  const body = await req.json();
+  const payload = body?.payload;
+  const userId = typeof body?.user_id === "string" ? body.user_id.trim() : "";
 
-  if (!payload || typeof payload !== "object") {
+  if (!userId) {
     return NextResponse.json(
-      { error: "payload is required and must be an object" },
-      { status: 400 }
-    )
+      { error: "user_id is required and must be a non-empty string" },
+      { status: 400 },
+    );
   }
 
-  const assignmentPayload = payload as Record<string, unknown>
-  const session = createChatSession(assignmentPayload)
-  startChatSessionRun(session.id, assignmentPayload)
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return NextResponse.json(
+      { error: "payload is required and must be an object" },
+      { status: 400 },
+    );
+  }
 
-  return NextResponse.json(serializeChatSession(session))
+  const requestId = crypto.randomUUID();
+
+  try {
+    const created = await createPersistedChatSession({
+      userId,
+      payload: payload as Record<string, unknown>,
+      requestId,
+    });
+
+    ensureRuntimeSession(created.sessionId);
+
+    startChatSessionRun({
+      sessionId: created.sessionId,
+      assignmentUuid: created.assignmentUuid,
+      payload: created.payload,
+    });
+
+    const snapshot = await getPersistedSessionSnapshot(created.sessionId);
+    if (!snapshot) {
+      return NextResponse.json(
+        { error: "session created but unavailable" },
+        { status: 500 },
+      );
+    }
+
+    const runtimeState = getRuntimeSession(created.sessionId);
+    return NextResponse.json(buildSessionDto(snapshot, runtimeState));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json(
+      { error: "Failed to create chat session", detail: message },
+      { status: 500 },
+    );
+  }
 }

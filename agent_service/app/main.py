@@ -26,9 +26,10 @@ from .api.v1.routes.runs import (
     handle_run_agent_request,
     handle_run_agent_stream_request,
 )
+from .api.v1.routes.chats import handle_chat_stream_request
 from .core.config import settings
 from .core.logging import configure_logging
-from .schemas.requests import RunAgentRequest
+from .schemas.requests import ChatStreamRequest, RunAgentRequest
 
 configure_logging()
 
@@ -49,3 +50,8 @@ def run_agent_legacy(req: RunAgentRequest):
 @app.post("/run-agent/stream")
 def run_agent_stream_legacy(req: RunAgentRequest):
     return handle_run_agent_stream_request(req, route_path="/run-agent/stream")
+
+
+@app.post("/chat/stream")
+def chat_stream_legacy(req: ChatStreamRequest):
+    return handle_chat_stream_request(req, route_path="/chat/stream")

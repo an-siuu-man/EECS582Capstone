@@ -48,12 +48,25 @@ type ChatSessionStage =
   | "streaming_output"
   | "validating_output"
   | "parsing_response"
+  | "chat_streaming"
   | "completed"
   | "failed"
+
+type ChatMessageResponse = {
+  id: string
+  message_index: number
+  sender_role: "user" | "assistant" | "system"
+  content_text: string
+  content_format: "plain_text" | "markdown" | "json"
+  metadata: Record<string, unknown>
+  created_at: string
+}
 
 type ChatSessionResponse = {
   ok: boolean
   session_id: string
+  assignment_uuid: string
+  user_id: string
   created_at: number
   updated_at: number
   status: ChatSessionStatus
@@ -64,11 +77,7 @@ type ChatSessionResponse = {
   result: unknown | null
   error: string | null
   payload: AssignmentPayload
-}
-
-type LocalChatMessage = {
-  role: "user" | "assistant"
-  content: string
+  messages: ChatMessageResponse[]
 }
 
 const EASE_OUT = [0.22, 1, 0.36, 1] as const
@@ -169,6 +178,8 @@ function stageLabel(stage: ChatSessionStage) {
       return "Validating Output"
     case "parsing_response":
       return "Parsing Response"
+    case "chat_streaming":
+      return "Chat Streaming"
     case "completed":
       return "Completed"
     case "failed":
@@ -202,7 +213,7 @@ function DashboardChatPageContent() {
   const [isPolling, setIsPolling] = useState(false)
   const [errorText, setErrorText] = useState<string | null>(null)
   const [draft, setDraft] = useState("")
-  const [localMessages, setLocalMessages] = useState<LocalChatMessage[]>([])
+  const [isSending, setIsSending] = useState(false)
   const [showProgressPanel, setShowProgressPanel] = useState(false)
   const [displayProgress, setDisplayProgress] = useState(0)
   const [statusToneIndex, setStatusToneIndex] = useState(0)
@@ -222,6 +233,47 @@ function DashboardChatPageContent() {
       top: viewport.scrollHeight,
       behavior,
     })
+  }
+
+  function upsertSessionMessage(
+    current: ChatSessionResponse,
+    nextMessage: ChatMessageResponse,
+  ) {
+    const index = current.messages.findIndex((entry) => entry.id === nextMessage.id)
+    const messages =
+      index === -1
+        ? [...current.messages, nextMessage]
+        : current.messages.map((entry, messageIndex) =>
+            messageIndex === index ? nextMessage : entry,
+          )
+    messages.sort((a, b) => a.message_index - b.message_index)
+    return {
+      ...current,
+      messages,
+      updated_at: Date.now(),
+    }
+  }
+
+  function patchSessionMessageContent(
+    current: ChatSessionResponse,
+    messageId: string,
+    updater: (previous: string) => string,
+  ) {
+    const index = current.messages.findIndex((entry) => entry.id === messageId)
+    if (index === -1) return current
+    const messages = current.messages.map((entry, messageIndex) =>
+      messageIndex === index
+        ? {
+            ...entry,
+            content_text: updater(entry.content_text),
+          }
+        : entry,
+    )
+    return {
+      ...current,
+      messages,
+      updated_at: Date.now(),
+    }
   }
 
   useEffect(() => {
@@ -269,10 +321,6 @@ function DashboardChatPageContent() {
         setShowProgressPanel(false)
         setDisplayProgress(100)
       }
-
-      if (nextSession.status === "completed" || nextSession.status === "failed") {
-        eventSource.close()
-      }
     }
 
     const parseSessionMessage = (event: MessageEvent<string>) => {
@@ -284,8 +332,89 @@ function DashboardChatPageContent() {
       }
     }
 
+    const parseChatMessageCreated = (event: MessageEvent<string>) => {
+      try {
+        const message = JSON.parse(event.data) as ChatMessageResponse
+        setSession((previous) => {
+          if (!previous || previous.session_id !== sessionId) return previous
+          return upsertSessionMessage(previous, message)
+        })
+        requestAnimationFrame(() => {
+          scrollThreadToBottom("smooth")
+        })
+      } catch {
+        setErrorText("Unable to parse chat message event.")
+      }
+    }
+
+    const parseChatMessageDelta = (event: MessageEvent<string>) => {
+      try {
+        const payload = JSON.parse(event.data) as {
+          message_id?: string
+          delta?: string
+          content?: string
+        }
+        if (!payload.message_id) return
+        const messageId = payload.message_id
+
+        setSession((previous) => {
+          if (!previous || previous.session_id !== sessionId) return previous
+          return patchSessionMessageContent(previous, messageId, (previousText) => {
+            if (typeof payload.content === "string") {
+              return payload.content
+            }
+            return `${previousText}${payload.delta ?? ""}`
+          })
+        })
+        requestAnimationFrame(() => {
+          scrollThreadToBottom("smooth")
+        })
+      } catch {
+        setErrorText("Unable to parse chat delta event.")
+      }
+    }
+
+    const parseChatMessageCompleted = (event: MessageEvent<string>) => {
+      try {
+        const payload = JSON.parse(event.data) as {
+          message_id?: string
+          content?: string
+        }
+        if (!payload.message_id || typeof payload.content !== "string") return
+        const messageId = payload.message_id
+        const content = payload.content
+
+        setSession((previous) => {
+          if (!previous || previous.session_id !== sessionId) return previous
+          return patchSessionMessageContent(previous, messageId, () => content)
+        })
+        setIsSending(false)
+      } catch {
+        setErrorText("Unable to parse chat completion event.")
+      }
+    }
+
+    const parseChatError = (event: MessageEvent<string>) => {
+      try {
+        const payload = JSON.parse(event.data) as {
+          message?: string
+        }
+        if (payload.message) {
+          setErrorText(payload.message)
+        }
+      } catch {
+        setErrorText("Unable to parse chat error event.")
+      } finally {
+        setIsSending(false)
+      }
+    }
+
     eventSource.addEventListener("session.snapshot", parseSessionMessage as EventListener)
     eventSource.addEventListener("session.update", parseSessionMessage as EventListener)
+    eventSource.addEventListener("chat.message.created", parseChatMessageCreated as EventListener)
+    eventSource.addEventListener("chat.message.delta", parseChatMessageDelta as EventListener)
+    eventSource.addEventListener("chat.message.completed", parseChatMessageCompleted as EventListener)
+    eventSource.addEventListener("chat.error", parseChatError as EventListener)
 
     eventSource.onerror = () => {
       if (isDisposed) return
@@ -357,6 +486,13 @@ function DashboardChatPageContent() {
     previousGuideLengthRef.current = currentLength
   }, [guideMarkdown])
 
+  useEffect(() => {
+    if (!effectiveSession) return
+    requestAnimationFrame(() => {
+      scrollThreadToBottom("smooth")
+    })
+  }, [effectiveSession])
+
   const progressLabel =
     effectiveSession?.status === "completed"
       ? "Guide ready"
@@ -371,26 +507,57 @@ function DashboardChatPageContent() {
   const isSessionLoading = Boolean(
     sessionId && !effectiveSession && !resolvedErrorText && !isPolling,
   )
+  const canSendMessage = Boolean(
+    effectiveSession &&
+      (effectiveSession.status === "completed" ||
+        effectiveSession.stage === "chat_streaming") &&
+      !isSending,
+  )
 
-  function handleSend(event: FormEvent<HTMLFormElement>) {
+  async function handleSend(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const text = draft.trim()
     if (!text) return
+    if (!effectiveSession) return
+    if (effectiveSession.status !== "completed" && effectiveSession.stage !== "chat_streaming") {
+      setErrorText("Guide generation is still in progress.")
+      return
+    }
 
-    setLocalMessages((prev) => [
-      ...prev,
-      { role: "user", content: text },
-      {
-        role: "assistant",
-        content: "Follow-up chat endpoint is not wired yet.",
-      },
-    ])
-    setDraft("")
-    requestAnimationFrame(() => {
+    setIsSending(true)
+    setErrorText(null)
+
+    try {
+      const response = await fetch(
+        `/api/chat-session/${encodeURIComponent(effectiveSession.session_id)}/messages`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            user_id: effectiveSession.user_id,
+            content: text,
+          }),
+        },
+      )
+
+      if (!response.ok) {
+        const errorBody = await response.text()
+        throw new Error(
+          errorBody || `Chat request failed (${response.status})`,
+        )
+      }
+
+      setDraft("")
       requestAnimationFrame(() => {
         scrollThreadToBottom("smooth")
       })
-    })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setErrorText(message)
+      setIsSending(false)
+    }
   }
 
   return (
@@ -648,19 +815,27 @@ function DashboardChatPageContent() {
                   </div>
                 ) : null}
 
-                {localMessages.map((message, index) => (
+                {(effectiveSession?.messages ?? []).map((message) => (
                   <motion.div
-                    key={`${message.role}-${index}`}
+                    key={message.id}
                     initial={reduceMotion ? false : { opacity: 0, y: 8 }}
                     animate={reduceMotion ? undefined : { opacity: 1, y: 0 }}
                     transition={reduceMotion ? undefined : { duration: 0.24, ease: EASE_OUT }}
                     className={
-                      message.role === "user"
+                      message.sender_role === "user"
                         ? "ml-auto w-fit max-w-[85%] rounded-2xl border border-brand-blue/35 bg-brand-blue/10 px-3 py-2 text-sm text-blue-900 shadow-sm"
                         : "max-w-[85%] rounded-2xl border border-border/70 bg-card px-3 py-2 text-sm shadow-sm"
                     }
                   >
-                    {message.content}
+                    {message.sender_role === "assistant" ? (
+                      <div className="[&_a]:font-medium [&_a]:text-blue-600 [&_a]:underline [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {message.content_text || "..."}
+                        </ReactMarkdown>
+                      </div>
+                    ) : (
+                      <p className="whitespace-pre-wrap">{message.content_text}</p>
+                    )}
                   </motion.div>
                 ))}
                 </div>
@@ -674,8 +849,12 @@ function DashboardChatPageContent() {
                 placeholder="Ask a follow-up question..."
                 className="border-transparent bg-transparent focus-visible:ring-0"
               />
-              <Button type="submit" disabled={draft.trim().length === 0} className="rounded-lg bg-brand-blue text-primary-foreground hover:bg-brand-blue/90">
-                <Send className="h-4 w-4" />
+              <Button type="submit" disabled={draft.trim().length === 0 || !canSendMessage} className="rounded-lg bg-brand-blue text-primary-foreground hover:bg-brand-blue/90">
+                {isSending ? (
+                  <LoaderCircle className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
               </Button>
             </form>
 

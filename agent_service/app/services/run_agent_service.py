@@ -24,8 +24,8 @@ import json
 from typing import Generator
 
 from ..core.logging import get_logger
-from ..schemas.requests import RunAgentRequest
-from ..schemas.responses import RunAgentResponse
+from ..schemas.requests import ChatStreamRequest, RunAgentRequest
+from ..schemas.responses import ChatCompletionResponse, RunAgentResponse
 from .pdf_text_service import extract_pdf_context
 
 logger = get_logger("headstart.main")
@@ -47,6 +47,25 @@ def _stream_headstart_agent_markdown(
     from ..orchestrators.headstart_orchestrator import stream_headstart_agent_markdown
 
     return stream_headstart_agent_markdown(payload, pdf_text, visual_signals=visual_signals)
+
+
+def _stream_headstart_chat_answer(
+    assignment_payload: dict,
+    guide_markdown: str,
+    chat_history: list[dict],
+    retrieval_context: list[dict],
+    user_message: str,
+):
+    """Lazy import to avoid loading LLM dependencies at module import time."""
+    from ..orchestrators.headstart_orchestrator import stream_headstart_chat_answer
+
+    return stream_headstart_chat_answer(
+        assignment_payload=assignment_payload,
+        guide_markdown=guide_markdown,
+        chat_history=chat_history,
+        retrieval_context=retrieval_context,
+        user_message=user_message,
+    )
 
 
 def run_agent_workflow(req: RunAgentRequest, route_path: str) -> dict:
@@ -232,6 +251,96 @@ def stream_run_agent_workflow(req: RunAgentRequest, route_path: str) -> Generato
                 "stage": "failed",
                 "progress_percent": 100,
                 "status_message": "Guide generation failed",
+                "message": str(exc),
+            },
+        )
+
+
+def stream_chat_workflow(req: ChatStreamRequest, route_path: str) -> Generator[dict, None, None]:
+    """
+    Execute follow-up chat workflow and emit typed stream events for SSE clients.
+
+    Event sequence:
+      chat.started -> chat.delta* -> chat.completed
+      or chat.error on failure.
+    """
+    logger.info(
+        "POST %s [chat.stream] | guide_len=%d | history=%d | retrieval_chunks=%d",
+        route_path,
+        len(req.guide_markdown or ""),
+        len(req.chat_history or []),
+        len(req.retrieval_context or []),
+    )
+
+    try:
+        yield _build_event(
+            "chat.started",
+            {
+                "stage": "chat_streaming",
+                "progress_percent": 97,
+                "status_message": "Generating follow-up response",
+            },
+        )
+
+        chunks: list[str] = []
+        chunk_count = 0
+        char_count = 0
+
+        for delta in _stream_headstart_chat_answer(
+            assignment_payload=req.assignment_payload,
+            guide_markdown=req.guide_markdown,
+            chat_history=[item.model_dump() for item in req.chat_history],
+            retrieval_context=[item.model_dump() for item in req.retrieval_context],
+            user_message=req.user_message,
+        ):
+            if not delta:
+                continue
+
+            chunks.append(delta)
+            chunk_count += 1
+            char_count += len(delta)
+            progress = min(99, 97 + round(2 * (1 - math.exp(-chunk_count / 8))))
+
+            yield _build_event(
+                "chat.delta",
+                {
+                    "stage": "chat_streaming",
+                    "progress_percent": progress,
+                    "status_message": "Generating follow-up response",
+                    "delta": delta,
+                    "chunk_index": chunk_count,
+                    "accumulated_chars": char_count,
+                },
+            )
+
+        assistant_message = "".join(chunks).strip()
+        if not assistant_message:
+            raise RuntimeError("Model returned empty follow-up response.")
+
+        result = ChatCompletionResponse.model_validate(
+            {
+                "assistantMessage": assistant_message,
+            }
+        ).model_dump()
+
+        logger.info("Streaming chat completed | chars=%d", len(assistant_message))
+        yield _build_event(
+            "chat.completed",
+            {
+                "assistant_message": result["assistantMessage"],
+                "stage": "completed",
+                "progress_percent": 100,
+                "status_message": "Response ready",
+            },
+        )
+    except Exception as exc:
+        logger.exception("Streaming chat failed")
+        yield _build_event(
+            "chat.error",
+            {
+                "stage": "failed",
+                "progress_percent": 100,
+                "status_message": "Follow-up response failed",
                 "message": str(exc),
             },
         )

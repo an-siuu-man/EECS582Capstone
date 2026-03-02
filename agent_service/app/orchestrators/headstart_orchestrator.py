@@ -492,3 +492,171 @@ def stream_headstart_agent_markdown(
     chunk_size = 900
     for start in range(0, len(markdown), chunk_size):
         yield markdown[start : start + chunk_size]
+
+SYSTEM_PROMPT_CHAT = """\
+You are an academic assistant helping a student with follow-up questions about an assignment.
+
+Use the provided assignment payload, generated guide, retrieval snippets, and prior chat context.
+
+Answer requirements:
+- Return MARKDOWN ONLY (no JSON and no code fences).
+- Be concise and actionable.
+- If relevant context is missing, explicitly say what is uncertain.
+- Prefer concrete next steps, checklists, or examples when useful.
+"""
+
+HUMAN_TEMPLATE_CHAT = """\
+Assignment payload:
+{payload}
+
+Generated assignment guide:
+{guide_markdown}
+
+Retrieved context snippets:
+{retrieval_context}
+
+Recent chat history:
+{chat_history}
+
+Student question:
+{user_message}
+"""
+
+
+def _format_chat_history_for_prompt(chat_history: Optional[list[dict]]) -> str:
+    if not chat_history:
+        return "(none)"
+
+    lines = []
+    for item in chat_history[-12:]:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role", "unknown")).strip() or "unknown"
+        content = str(item.get("content", "")).strip()
+        if not content:
+            continue
+        lines.append(f"- {role}: {content}")
+
+    return "\n".join(lines) if lines else "(none)"
+
+
+def _format_retrieval_context_for_prompt(retrieval_context: Optional[list[dict]]) -> str:
+    if not retrieval_context:
+        return "(none)"
+
+    lines = []
+    for item in retrieval_context[:20]:
+        if not isinstance(item, dict):
+            continue
+
+        text = str(item.get("text", "")).strip()
+        if not text:
+            continue
+
+        chunk_id = str(item.get("chunk_id", "?"))
+        source = str(item.get("source", "unknown"))
+        score = item.get("score", "?")
+        lines.append(
+            f"- [{source} | {chunk_id} | score={score}] {text}"
+        )
+
+    return "\n".join(lines) if lines else "(none)"
+
+
+def _build_followup_chat_chain(llm):
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", SYSTEM_PROMPT_CHAT),
+            ("human", HUMAN_TEMPLATE_CHAT),
+        ]
+    )
+    return prompt | llm
+
+
+def stream_headstart_chat_answer(
+    assignment_payload: dict,
+    guide_markdown: str,
+    chat_history: Optional[list[dict]] = None,
+    retrieval_context: Optional[list[dict]] = None,
+    user_message: str = "",
+) -> Iterator[str]:
+    """
+    Stream follow-up chat answer chunks from the model when provider streaming is available.
+    Falls back to single invoke chunking when needed.
+    """
+    api_key = os.getenv("NVIDIA_API_KEY")
+    if not api_key:
+        raise RuntimeError("NVIDIA_API_KEY is not set")
+
+    logger.info(
+        "Initializing follow-up chat LLM | model=%s temperature=%s max_tokens=%d",
+        MODEL_NAME,
+        TEMPERATURE,
+        MAX_OUTPUT_TOKENS,
+    )
+
+    llm = build_nvidia_chat_client(
+        model_name=MODEL_NAME,
+        temperature=TEMPERATURE,
+        max_tokens=MAX_OUTPUT_TOKENS,
+    )
+    chain = _build_followup_chat_chain(llm)
+
+    payload_str = json.dumps(assignment_payload or {}, ensure_ascii=False)
+    guide_markdown_str = guide_markdown or "(no generated guide available)"
+    chat_history_str = _format_chat_history_for_prompt(chat_history)
+    retrieval_context_str = _format_retrieval_context_for_prompt(retrieval_context)
+    user_message_str = (user_message or "").strip()
+    if not user_message_str:
+        user_message_str = "Please summarize what I should do next."
+
+    inputs = {
+        "payload": payload_str,
+        "guide_markdown": guide_markdown_str,
+        "retrieval_context": retrieval_context_str,
+        "chat_history": chat_history_str,
+        "user_message": user_message_str,
+    }
+
+    has_streamed_content = False
+    streamed_text = ""
+    try:
+        stream_fn = getattr(chain, "stream", None)
+        if callable(stream_fn):
+            logger.info("Streaming follow-up chat response from provider")
+            for chunk in stream_fn(inputs):
+                chunk_text = _to_text(chunk)
+                if not chunk_text:
+                    continue
+
+                if chunk_text.startswith(streamed_text):
+                    delta = chunk_text[len(streamed_text) :]
+                else:
+                    delta = chunk_text
+
+                if not delta:
+                    continue
+
+                streamed_text += delta
+                has_streamed_content = True
+                yield delta
+    except Exception as exc:
+        logger.warning(
+            "Provider follow-up chat streaming failed; falling back to single invoke: %s",
+            repr(exc),
+        )
+        has_streamed_content = False
+        streamed_text = ""
+
+    if has_streamed_content:
+        return
+
+    logger.info("Using single invoke follow-up chat fallback")
+    result = chain.invoke(inputs)
+    content = _extract_markdown_payload(_to_text(result))
+    if not content:
+        raise RuntimeError("Model returned empty follow-up response.")
+
+    chunk_size = 900
+    for start in range(0, len(content), chunk_size):
+        yield content[start : start + chunk_size]

@@ -49,6 +49,7 @@ export function buildHeadstartPayload(stored) {
     dueAtISO,
     dueDateFormatted,
     userTimezone,
+    userId: source?.userId ?? stored?.userId ?? null,
 
     flags: {
       daysToDue,

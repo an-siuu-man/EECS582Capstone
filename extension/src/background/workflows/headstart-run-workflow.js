@@ -100,7 +100,10 @@ export async function handleStartHeadstartRun(tab, pageTitle) {
   try {
     log.info(`POST ${BACKEND_BASE_URL}/api/chat-session`);
     const sessionStart = Date.now();
-    const session = await createChatSession({ payload }, BACKEND_BASE_URL);
+    const session = await createChatSession(
+      { payload, userId: payload.userId || payload.user_id },
+      BACKEND_BASE_URL,
+    );
     log.info(`/api/chat-session -> 200 (${Date.now() - sessionStart}ms)`);
     log.debug("/api/chat-session response:", session);
 
