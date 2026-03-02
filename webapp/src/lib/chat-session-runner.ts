@@ -11,6 +11,7 @@ import {
 import {
   createHeadstartRun,
   getSessionGuideAndHistory,
+  listSignedSnapshotPdfFiles,
   markHeadstartRunFailed,
   markHeadstartRunSucceeded,
   saveRunPdfFiles,
@@ -284,15 +285,23 @@ async function runInitialGuide(input: {
     });
     runId = run.id;
 
-    await saveRunPdfFiles(run.id, payload.pdfAttachments);
+    const snapshotPdfFiles = await listSignedSnapshotPdfFiles(assignmentUuid);
+    await saveRunPdfFiles(
+      run.id,
+      snapshotPdfFiles.map((file) => ({
+        filename: file.filename,
+        fileSha256: file.fileSha256,
+        storageUri: file.storagePath,
+      })),
+    );
 
-    const { pdfAttachments = [], ...payloadWithoutPdfs } = payload;
-    const pdfFiles = pdfAttachments
-      .filter((item) => typeof item?.base64Data === "string" && item.base64Data.length > 0)
-      .map((item) => ({
-        filename: item.filename ?? "attachment.pdf",
-        base64_data: item.base64Data as string,
-      }));
+    const payloadWithoutPdfs = { ...payload } as AssignmentPayload;
+    delete payloadWithoutPdfs.pdfAttachments;
+    const pdfFiles = snapshotPdfFiles.map((file) => ({
+      filename: file.filename,
+      file_sha256: file.fileSha256,
+      storage_url: file.signedUrl,
+    }));
 
     const agentUrl = process.env.AGENT_SERVICE_URL;
     if (!agentUrl) {

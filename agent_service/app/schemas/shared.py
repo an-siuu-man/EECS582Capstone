@@ -18,12 +18,16 @@ Errors/Exceptions:
 - Pydantic validation errors for invalid payload data.
 """
 
+from typing import Optional
+
 from pydantic import BaseModel
 
 
 class PdfFile(BaseModel):
     filename: str
-    base64_data: str
+    base64_data: Optional[str] = None
+    storage_url: Optional[str] = None
+    file_sha256: Optional[str] = None
 
 
 class Milestone(BaseModel):

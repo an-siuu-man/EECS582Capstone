@@ -22,7 +22,7 @@ The streaming request uses the existing run contract:
 - `assignment_uuid` (optional string)
 - `payload` (required object)
 - `pdf_text` (optional string)
-- `pdf_files` (optional list)
+- `pdf_files` (optional list of `{ filename, storage_url? , base64_data? }`)
 
 No contract changes were introduced for callers.
 

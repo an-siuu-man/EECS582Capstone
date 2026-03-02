@@ -1,15 +1,19 @@
+import { Buffer } from "node:buffer";
+
 import {
   type AssignmentPayload,
   type ChatMessageDto,
   type ChatMessageFormat,
   type ChatMessageRole,
   type ChatSessionStatus,
+  type PdfAttachment,
   type PersistedSessionSnapshot,
 } from "@/lib/chat-types";
 import {
   canonicalizeJson,
   extractDomainFromUrl,
-  sha256Hex,
+  supabaseStorageCreateSignedUrl,
+  supabaseStorageUploadObject,
   supabaseTableRequest,
 } from "@/lib/supabase-rest";
 
@@ -38,6 +42,21 @@ type DbAssignmentSnapshot = {
 type DbAssignmentIngest = {
   assignment_uuid: string;
   assignment_snapshot_id: string;
+};
+
+type DbAssignmentSnapshotFile = {
+  assignment_snapshot_id: string;
+  filename: string;
+  file_sha256: string;
+  storage_path: string;
+  byte_size?: number | null;
+};
+
+type DbStoredPdfBlob = {
+  file_sha256: string;
+  storage_path?: string;
+  byte_size?: number | null;
+  uploaded_at?: string | null;
 };
 
 type DbChatSession = {
@@ -74,6 +93,35 @@ type DbHeadstartDocument = {
   description: string;
 };
 
+type SnapshotAttachmentPayload = {
+  filename: string;
+  fileSha256?: string;
+  storagePath?: string;
+  byteSize?: number;
+};
+
+type PreparedSnapshotFile = {
+  filename: string;
+  fileSha256: string;
+  storagePath: string;
+  byteSize: number;
+  bytes?: Uint8Array;
+};
+
+export type SignedSnapshotPdfFile = {
+  filename: string;
+  fileSha256: string;
+  storagePath: string;
+  byteSize: number | null;
+  signedUrl: string;
+};
+
+export type RunPdfFileInput = {
+  filename: string;
+  fileSha256: string;
+  storageUri?: string | null;
+};
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -84,6 +132,10 @@ function toEpoch(value: string) {
 
 function eq(value: string | number | boolean) {
   return `eq.${value}`;
+}
+
+function isNull() {
+  return "is.null";
 }
 
 function inList(values: string[]) {
@@ -133,6 +185,162 @@ function toTitle(payload: AssignmentPayload) {
 function toOptionalNumber(value: unknown) {
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
   return value;
+}
+
+function toOptionalPositiveInteger(value: unknown) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  const rounded = Math.floor(value);
+  return rounded >= 0 ? rounded : null;
+}
+
+function toUint8ArrayBase64(base64Data: string) {
+  const trimmed = base64Data.trim();
+  const payload =
+    trimmed.startsWith("data:") && trimmed.includes(",")
+      ? trimmed.split(",", 2)[1]
+      : trimmed;
+  return new Uint8Array(Buffer.from(payload, "base64"));
+}
+
+function bufferToHex(buffer: ArrayBuffer) {
+  return Array.from(new Uint8Array(buffer))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function sha256HexFromBytes(bytes: Uint8Array) {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  const digest = await crypto.subtle.digest("SHA-256", copy.buffer);
+  return bufferToHex(digest);
+}
+
+async function sha256HexFromString(value: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return bufferToHex(digest);
+}
+
+const SNAPSHOT_PDF_BUCKET =
+  toOptionalString(process.env.SUPABASE_ASSIGNMENT_PDF_BUCKET) ?? "assignment-pdfs";
+const SNAPSHOT_PDF_SIGNED_URL_TTL_SECONDS = (() => {
+  const raw = Number(process.env.SUPABASE_ASSIGNMENT_PDF_SIGNED_URL_TTL_SECONDS ?? "600");
+  if (!Number.isFinite(raw)) return 600;
+  return Math.max(60, Math.floor(raw));
+})();
+
+function buildSnapshotStoragePath(fileSha256: string) {
+  const prefix = fileSha256.slice(0, 2);
+  return `snapshots/${prefix}/${fileSha256}.pdf`;
+}
+
+function toSnapshotAttachmentPayload(
+  entry: Record<string, unknown>,
+  fallbackFilename: string,
+): SnapshotAttachmentPayload {
+  const filename = toOptionalString(entry.filename) ?? fallbackFilename;
+  const fileSha256 =
+    toOptionalString(entry.fileSha256) ?? toOptionalString(entry.file_sha256) ?? undefined;
+  const storagePath =
+    toOptionalString(entry.storagePath) ?? toOptionalString(entry.storage_path) ?? undefined;
+  const byteSize = toOptionalPositiveInteger(entry.byteSize ?? entry.byte_size) ?? undefined;
+
+  return {
+    filename,
+    fileSha256,
+    storagePath,
+    byteSize,
+  };
+}
+
+async function prepareSnapshotAttachments(
+  attachments: PdfAttachment[] | undefined,
+): Promise<{
+  payloadAttachments: SnapshotAttachmentPayload[];
+  snapshotFiles: PreparedSnapshotFile[];
+}> {
+  const list = Array.isArray(attachments) ? attachments : [];
+  const payloadAttachments: SnapshotAttachmentPayload[] = [];
+  const snapshotFiles: PreparedSnapshotFile[] = [];
+
+  for (let index = 0; index < list.length; index += 1) {
+    const item = list[index] as Record<string, unknown>;
+    const fallbackFilename = `attachment-${index + 1}.pdf`;
+    const filename = toOptionalString(item.filename) ?? fallbackFilename;
+    const base64Data = toOptionalString(item.base64Data);
+
+    if (!base64Data) {
+      const metadataOnly = toSnapshotAttachmentPayload(item, fallbackFilename);
+      payloadAttachments.push(metadataOnly);
+      if (metadataOnly.fileSha256 && metadataOnly.storagePath) {
+        snapshotFiles.push({
+          filename: metadataOnly.filename,
+          fileSha256: metadataOnly.fileSha256,
+          storagePath: metadataOnly.storagePath,
+          byteSize: metadataOnly.byteSize ?? 0,
+        });
+      }
+      continue;
+    }
+
+    let bytes: Uint8Array;
+    try {
+      bytes = toUint8ArrayBase64(base64Data);
+    } catch {
+      payloadAttachments.push({
+        filename,
+      });
+      continue;
+    }
+    const fileSha256 = await sha256HexFromBytes(bytes);
+    const storagePath = buildSnapshotStoragePath(fileSha256);
+    const byteSize = bytes.byteLength;
+
+    payloadAttachments.push({
+      filename,
+      fileSha256,
+      storagePath,
+      byteSize,
+    });
+    snapshotFiles.push({
+      filename,
+      fileSha256,
+      storagePath,
+      byteSize,
+      bytes,
+    });
+  }
+
+  return {
+    payloadAttachments,
+    snapshotFiles,
+  };
+}
+
+function withAttachmentMetadataPayload(
+  payload: AssignmentPayload,
+  attachments: SnapshotAttachmentPayload[],
+): AssignmentPayload {
+  return {
+    ...payload,
+    pdfAttachments: attachments.map((item) => ({
+      filename: item.filename,
+      fileSha256: item.fileSha256,
+      storagePath: item.storagePath,
+      byteSize: item.byteSize,
+    })),
+  };
+}
+
+function sanitizePayloadForResponse(payload: AssignmentPayload): AssignmentPayload {
+  const rawAttachments = Array.isArray(payload.pdfAttachments)
+    ? payload.pdfAttachments
+    : [];
+
+  const sanitized = rawAttachments.map((item, index) =>
+    toSnapshotAttachmentPayload(item as Record<string, unknown>, `attachment-${index + 1}.pdf`),
+  );
+
+  return withAttachmentMetadataPayload(payload, sanitized);
 }
 
 export type UserChatSessionListItem = {
@@ -259,6 +467,198 @@ async function selectFirst<T>(input: {
   return rows[0] ?? null;
 }
 
+async function getAssignmentIngestByAssignmentUuid(assignmentUuid: string) {
+  return selectFirst<DbAssignmentIngest>({
+    table: "assignment_ingests",
+    query: {
+      assignment_uuid: eq(assignmentUuid),
+      select: "assignment_uuid,assignment_snapshot_id",
+      limit: 1,
+    },
+  });
+}
+
+async function persistSnapshotFiles(
+  assignmentSnapshotId: string,
+  snapshotFiles: PreparedSnapshotFile[],
+) {
+  const normalized = snapshotFiles.filter(
+    (item) =>
+      item.fileSha256.trim().length > 0 &&
+      item.storagePath.trim().length > 0 &&
+      item.filename.trim().length > 0,
+  );
+
+  if (normalized.length === 0) {
+    return;
+  }
+
+  const uniqueByHash = new Map<string, PreparedSnapshotFile>();
+  for (const file of normalized) {
+    if (!uniqueByHash.has(file.fileSha256)) {
+      uniqueByHash.set(file.fileSha256, file);
+    }
+  }
+  const uniqueFiles = Array.from(uniqueByHash.values());
+  const hashes = uniqueFiles.map((file) => file.fileSha256);
+
+  const existingBlobs =
+    hashes.length > 0
+      ? await selectMany<DbStoredPdfBlob>({
+          table: "stored_pdf_blobs",
+          query: {
+            file_sha256: inList(hashes),
+            select: "file_sha256,storage_path,byte_size,uploaded_at",
+          },
+        })
+      : [];
+  const existingByHash = new Map(
+    existingBlobs.map((blob) => [blob.file_sha256, blob]),
+  );
+
+  const rowsToInsert = uniqueFiles
+    .filter((file) => !existingByHash.has(file.fileSha256))
+    .map((file) => ({
+      file_sha256: file.fileSha256,
+      storage_path: file.storagePath,
+      byte_size: file.byteSize,
+      uploaded_at: null,
+    }));
+
+  if (rowsToInsert.length > 0) {
+    await supabaseTableRequest<unknown[]>({
+      table: "stored_pdf_blobs",
+      method: "POST",
+      query: {
+        on_conflict: "file_sha256",
+      },
+      headers: {
+        Prefer: "resolution=merge-duplicates,return=minimal",
+      },
+      body: rowsToInsert,
+    });
+  }
+
+  const refreshedBlobs =
+    hashes.length > 0
+      ? await selectMany<DbStoredPdfBlob>({
+          table: "stored_pdf_blobs",
+          query: {
+            file_sha256: inList(hashes),
+            select: "file_sha256,uploaded_at",
+          },
+        })
+      : [];
+  const uploadedHashes = new Set(
+    refreshedBlobs
+      .filter((blob) => typeof blob.uploaded_at === "string" && blob.uploaded_at.trim().length > 0)
+      .map((blob) => blob.file_sha256),
+  );
+
+  const filesToUpload = uniqueFiles.filter(
+    (file) => !uploadedHashes.has(file.fileSha256),
+  );
+  const missingBytes = filesToUpload.filter((file) => !file.bytes);
+  if (missingBytes.length > 0) {
+    throw new Error(
+      `Missing binary payload for ${missingBytes.length} file hash(es) that are not uploaded yet.`,
+    );
+  }
+
+  await Promise.all(
+    filesToUpload.map((file) =>
+      supabaseStorageUploadObject({
+        bucket: SNAPSHOT_PDF_BUCKET,
+        path: file.storagePath,
+        data: file.bytes as Uint8Array,
+        contentType: "application/pdf",
+        upsert: true,
+      }),
+    ),
+  );
+
+  if (filesToUpload.length > 0) {
+    const uploadedAt = nowIso();
+    await Promise.all(
+      filesToUpload.map((file) =>
+        supabaseTableRequest<unknown[]>({
+          table: "stored_pdf_blobs",
+          method: "PATCH",
+          query: {
+            file_sha256: eq(file.fileSha256),
+            uploaded_at: isNull(),
+          },
+          headers: {
+            Prefer: "return=minimal",
+          },
+          body: {
+            uploaded_at: uploadedAt,
+          },
+        }),
+      ),
+    );
+  }
+
+  const rows = normalized.map((file) => ({
+    assignment_snapshot_id: assignmentSnapshotId,
+    filename: file.filename,
+    file_sha256: file.fileSha256,
+    storage_path: file.storagePath,
+    byte_size: file.byteSize,
+  }));
+
+  await supabaseTableRequest<unknown[]>({
+    table: "assignment_snapshot_files",
+    method: "POST",
+    query: {
+      on_conflict: "assignment_snapshot_id,file_sha256,filename",
+    },
+    headers: {
+      Prefer: "resolution=merge-duplicates,return=minimal",
+    },
+    body: rows,
+  });
+}
+
+async function getSnapshotPdfFilesByAssignmentUuid(
+  assignmentUuid: string,
+): Promise<DbAssignmentSnapshotFile[]> {
+  const ingest = await getAssignmentIngestByAssignmentUuid(assignmentUuid);
+  if (!ingest) return [];
+
+  return selectMany<DbAssignmentSnapshotFile>({
+    table: "assignment_snapshot_files",
+    query: {
+      assignment_snapshot_id: eq(ingest.assignment_snapshot_id),
+      select: "assignment_snapshot_id,filename,file_sha256,storage_path,byte_size",
+      order: "created_at.asc",
+    },
+  });
+}
+
+export async function listSignedSnapshotPdfFiles(
+  assignmentUuid: string,
+): Promise<SignedSnapshotPdfFile[]> {
+  const snapshotFiles = await getSnapshotPdfFilesByAssignmentUuid(assignmentUuid);
+  if (snapshotFiles.length === 0) {
+    return [];
+  }
+
+  return Promise.all(
+    snapshotFiles.map(async (file) => ({
+      filename: file.filename,
+      fileSha256: file.file_sha256,
+      storagePath: file.storage_path,
+      byteSize: file.byte_size ?? null,
+      signedUrl: await supabaseStorageCreateSignedUrl({
+        bucket: SNAPSHOT_PDF_BUCKET,
+        path: file.storage_path,
+        expiresInSeconds: SNAPSHOT_PDF_SIGNED_URL_TTL_SECONDS,
+      }),
+    })),
+  );
+}
+
 async function ensureLmsIntegration(userId: string, payload: AssignmentPayload) {
   const instanceDomain = extractDomainFromUrl(toOptionalString(payload.url) ?? undefined);
   const externalUserId = toExternalUserId(userId, payload);
@@ -319,9 +719,9 @@ async function ensureAssignment(courseId: string, payload: AssignmentPayload) {
 async function upsertAssignmentSnapshot(
   assignmentId: string,
   payload: AssignmentPayload,
+  snapshotPayload: AssignmentPayload,
 ) {
-  const normalizedPayload = normalizePayload(payload);
-  const contentHash = await sha256Hex(canonicalizeJson(normalizedPayload));
+  const contentHash = await sha256HexFromString(canonicalizeJson(snapshotPayload));
 
   return upsertSingle<DbAssignmentSnapshot>({
     table: "assignment_snapshots",
@@ -338,7 +738,7 @@ async function upsertAssignmentSnapshot(
         submission_type: toOptionalString(payload.submissionType),
         rubric_json: payload.rubric ?? null,
         user_timezone: toOptionalString(payload.userTimezone),
-        raw_payload: normalizedPayload,
+        raw_payload: snapshotPayload,
         content_hash: contentHash,
       },
     ],
@@ -350,12 +750,22 @@ export async function createPersistedChatSession(input: {
   payload: AssignmentPayload;
   requestId?: string;
 }) {
-  const payload = normalizePayload(input.payload);
+  const normalizedPayload = normalizePayload(input.payload);
+  const preparedAttachments = await prepareSnapshotAttachments(normalizedPayload.pdfAttachments);
+  const snapshotPayload = withAttachmentMetadataPayload(
+    normalizedPayload,
+    preparedAttachments.payloadAttachments,
+  );
 
-  const integration = await ensureLmsIntegration(input.userId, payload);
-  const course = await ensureCourse(integration.id, payload);
-  const assignment = await ensureAssignment(course.id, payload);
-  const snapshot = await upsertAssignmentSnapshot(assignment.id, payload);
+  const integration = await ensureLmsIntegration(input.userId, normalizedPayload);
+  const course = await ensureCourse(integration.id, normalizedPayload);
+  const assignment = await ensureAssignment(course.id, normalizedPayload);
+  const snapshot = await upsertAssignmentSnapshot(
+    assignment.id,
+    normalizedPayload,
+    snapshotPayload,
+  );
+  await persistSnapshotFiles(snapshot.id, preparedAttachments.snapshotFiles);
 
   const assignmentUuid = crypto.randomUUID();
 
@@ -373,7 +783,7 @@ export async function createPersistedChatSession(input: {
     row: {
       user_id: input.userId,
       assignment_uuid: assignmentUuid,
-      title: toTitle(payload),
+      title: toTitle(normalizedPayload),
       status: "queued",
       updated_at: nowIso(),
     },
@@ -385,7 +795,7 @@ export async function createPersistedChatSession(input: {
     userId: session.user_id,
     createdAt: toEpoch(session.created_at),
     updatedAt: toEpoch(session.updated_at),
-    payload,
+    payload: snapshotPayload,
   };
 }
 
@@ -405,14 +815,7 @@ export async function getPersistedSessionSnapshot(
     return null;
   }
 
-  const ingest = await selectFirst<DbAssignmentIngest>({
-    table: "assignment_ingests",
-    query: {
-      assignment_uuid: eq(session.assignment_uuid),
-      select: "assignment_uuid,assignment_snapshot_id",
-      limit: 1,
-    },
-  });
+  const ingest = await getAssignmentIngestByAssignmentUuid(session.assignment_uuid);
 
   if (!ingest) {
     throw new Error(`assignment_ingests missing for assignment_uuid=${session.assignment_uuid}`);
@@ -464,7 +867,9 @@ export async function getPersistedSessionSnapshot(
     guideMarkdown = doc?.description ?? "";
   }
 
-  const payload = asObject(snapshot.raw_payload) as AssignmentPayload;
+  const payload = sanitizePayloadForResponse(
+    asObject(snapshot.raw_payload) as AssignmentPayload,
+  );
 
   return {
     sessionId: session.id,
@@ -553,7 +958,9 @@ export async function listPersistedChatSessionsForUser(
     const snapshot = ingest
       ? snapshotById.get(ingest.assignment_snapshot_id)
       : undefined;
-    const payload = asObject(snapshot?.raw_payload);
+    const payload = sanitizePayloadForResponse(
+      asObject(snapshot?.raw_payload) as AssignmentPayload,
+    );
     const attachmentCount = Array.isArray(payload.pdfAttachments)
       ? payload.pdfAttachments.length
       : 0;
@@ -677,27 +1084,22 @@ export async function upsertHeadstartDocument(runId: string, guideMarkdown: stri
 
 export async function saveRunPdfFiles(
   runId: string,
-  attachments: AssignmentPayload["pdfAttachments"] | undefined,
+  files: RunPdfFileInput[] | undefined,
 ) {
-  if (!attachments || attachments.length === 0) {
+  if (!files || files.length === 0) {
     return;
   }
 
-  const rows = await Promise.all(
-    attachments
-      .filter((item) => typeof item?.base64Data === "string" && item.base64Data.length > 0)
-      .map(async (item, index) => {
-        const base64Data = item?.base64Data as string;
-        const sha = await sha256Hex(base64Data);
-        return {
-          run_id: runId,
-          filename: toOptionalString(item?.filename) ?? `attachment-${index + 1}.pdf`,
-          file_sha256: sha,
-          extraction_mode: "none",
-          page_count: null,
-        };
-      }),
-  );
+  const rows = files
+    .filter((file) => file.fileSha256.trim().length > 0)
+    .map((file, index) => ({
+      run_id: runId,
+      filename: toOptionalString(file.filename) ?? `attachment-${index + 1}.pdf`,
+      file_sha256: file.fileSha256,
+      storage_uri: toOptionalString(file.storageUri) ?? null,
+      extraction_mode: "none",
+      page_count: null,
+    }));
 
   if (rows.length === 0) {
     return;

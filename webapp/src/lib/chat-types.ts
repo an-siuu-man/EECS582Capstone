@@ -1,6 +1,9 @@
 export type PdfAttachment = {
   filename?: string;
   base64Data?: string;
+  fileSha256?: string;
+  byteSize?: number;
+  storagePath?: string;
 };
 
 export type AssignmentPayload = Record<string, unknown> & {

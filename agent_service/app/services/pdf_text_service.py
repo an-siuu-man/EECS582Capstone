@@ -25,6 +25,8 @@ import io
 import math
 import os
 import re
+import urllib.error
+import urllib.request
 from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -49,6 +51,30 @@ HEADER_FOOTER_MIN_PAGES = 3
 MAX_VISUAL_SIGNALS_PER_FILE = 40
 MAX_VISUAL_SIGNAL_TEXT_LEN = 140
 MIN_RECT_WORD_OVERLAP = 0.20
+
+
+def _env_float(name: str, fallback: float) -> float:
+    try:
+        value = float(os.getenv(name, str(fallback)))
+    except Exception:
+        return fallback
+    if value <= 0:
+        return fallback
+    return value
+
+
+def _env_int(name: str, fallback: int) -> int:
+    try:
+        value = int(float(os.getenv(name, str(fallback))))
+    except Exception:
+        return fallback
+    if value <= 0:
+        return fallback
+    return value
+
+
+PDF_FETCH_TIMEOUT_SECONDS = _env_float("PDF_FETCH_TIMEOUT_SECONDS", 15.0)
+PDF_FETCH_MAX_BYTES = _env_int("PDF_FETCH_MAX_BYTES", 25 * 1024 * 1024)
 
 SIGNAL_BASE_SCORES = {
     "highlight": 1.00,
@@ -563,6 +589,72 @@ def _decode_pdf_base64(base64_data: str) -> bytes:
     return base64.b64decode(data)
 
 
+def _download_pdf_from_storage_url(storage_url: str, filename: str) -> Optional[bytes]:
+    url = (storage_url or "").strip()
+    if not url:
+        return None
+
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/pdf,application/octet-stream,*/*",
+            "User-Agent": "headstart-agent/1.0",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=PDF_FETCH_TIMEOUT_SECONDS) as resp:
+            content_length_raw = resp.headers.get("Content-Length")
+            if content_length_raw:
+                try:
+                    content_length = int(content_length_raw)
+                    if content_length > PDF_FETCH_MAX_BYTES:
+                        logger.warning(
+                            "Skipping %r from storage_url (Content-Length=%d exceeds max=%d)",
+                            filename,
+                            content_length,
+                            PDF_FETCH_MAX_BYTES,
+                        )
+                        return None
+                except Exception:
+                    pass
+
+            total = 0
+            chunks = []
+            while True:
+                chunk = resp.read(64 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > PDF_FETCH_MAX_BYTES:
+                    logger.warning(
+                        "Skipping %r from storage_url (downloaded %d bytes exceeds max=%d)",
+                        filename,
+                        total,
+                        PDF_FETCH_MAX_BYTES,
+                    )
+                    return None
+                chunks.append(chunk)
+
+            payload = b"".join(chunks)
+            logger.debug(
+                "Downloaded PDF %r from storage_url – %d bytes",
+                filename,
+                len(payload),
+            )
+            return payload
+    except urllib.error.HTTPError as e:
+        logger.warning("Failed to fetch %r from storage_url – HTTP %s", filename, e.code)
+    except urllib.error.URLError as e:
+        logger.warning("Failed to fetch %r from storage_url – %s", filename, e.reason)
+    except TimeoutError:
+        logger.warning("Timed out fetching %r from storage_url", filename)
+    except Exception as e:
+        logger.warning("Failed to fetch %r from storage_url: %s", filename, e)
+
+    return None
+
+
 def extract_pdf_context(req: RunAgentRequest) -> tuple[str, list[dict]]:
     """
     Build combined PDF text and visual-emphasis signals from request attachments.
@@ -574,11 +666,24 @@ def extract_pdf_context(req: RunAgentRequest) -> tuple[str, list[dict]]:
         parts.append(req.pdf_text)
 
     for pdf_file in req.pdf_files or []:
-        try:
-            pdf_bytes = _decode_pdf_base64(pdf_file.base64_data)
-            logger.debug("Decoding PDF %r – %d bytes", pdf_file.filename, len(pdf_bytes))
-        except Exception as e:
-            logger.warning("Failed to decode base64 for %r: %s", pdf_file.filename, e)
+        pdf_bytes = None
+
+        if pdf_file.storage_url:
+            pdf_bytes = _download_pdf_from_storage_url(pdf_file.storage_url, pdf_file.filename)
+
+        if pdf_bytes is None and pdf_file.base64_data:
+            try:
+                pdf_bytes = _decode_pdf_base64(pdf_file.base64_data)
+                logger.debug("Decoding PDF %r – %d bytes", pdf_file.filename, len(pdf_bytes))
+            except Exception as e:
+                logger.warning("Failed to decode base64 for %r: %s", pdf_file.filename, e)
+                continue
+
+        if pdf_bytes is None:
+            logger.warning(
+                "Skipping %r: missing usable storage_url/base64_data input",
+                pdf_file.filename,
+            )
             continue
 
         text, file_signals = extract_pdf_context_from_pdf_bytes(pdf_bytes, pdf_file.filename)
