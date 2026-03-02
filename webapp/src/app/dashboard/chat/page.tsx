@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { format } from "date-fns"
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion"
 import { LoaderCircle, Send } from "lucide-react"
-import ReactMarkdown from "react-markdown"
+import ReactMarkdown, { type Components } from "react-markdown"
 import remarkGfm from "remark-gfm"
 
 import { Badge } from "@/components/ui/badge"
@@ -92,6 +92,28 @@ type ChatSessionListItemResponse = {
 const EASE_OUT = [0.22, 1, 0.36, 1] as const
 const THINK_OPEN_TAG = "<think>"
 const THINK_CLOSE_TAG = "</think>"
+const CHAT_LIST_CONTAINER_VARIANTS = {
+  hidden: { opacity: 0 },
+  show: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.06,
+      delayChildren: 0.04,
+    },
+  },
+}
+const CHAT_LIST_ITEM_VARIANTS = {
+  hidden: { opacity: 0, y: 8, scale: 0.99 },
+  show: {
+    opacity: 1,
+    y: 0,
+    scale: 1,
+    transition: {
+      duration: 0.24,
+      ease: EASE_OUT,
+    },
+  },
+}
 const STAGE_BADGE_TONES = [
   "border-cyan-400/60 bg-cyan-500/15 text-cyan-800 dark:text-cyan-200",
   "border-amber-400/60 bg-amber-500/15 text-amber-800 dark:text-amber-200",
@@ -99,6 +121,17 @@ const STAGE_BADGE_TONES = [
   "border-lime-400/60 bg-lime-500/15 text-lime-800 dark:text-lime-200",
   "border-indigo-400/60 bg-indigo-500/15 text-indigo-800 dark:text-indigo-200",
 ] as const
+const MARKDOWN_COMPONENTS: Components = {
+  table: (props) => {
+    const { node, ...tableProps } = props
+    void node
+    return (
+      <div className="my-3 w-full overflow-x-auto">
+        <table {...tableProps} />
+      </div>
+    )
+  },
+}
 
 function normalizeResult(result: unknown) {
   if (result == null) return result
@@ -171,7 +204,7 @@ function removeThinkBlocks(markdown: string) {
 
 function ThinkingMessage({ reduceMotion }: { reduceMotion: boolean | null }) {
   return (
-    <div className="inline-flex items-center text-sm font-medium text-muted-foreground">
+    <div className="inline-flex items-center text-[15px] font-medium text-muted-foreground">
       {reduceMotion ? (
         <span>Thinking</span>
       ) : (
@@ -577,8 +610,8 @@ function DashboardChatPageContent() {
       : effectiveSession?.status_message || "Generating guide..."
   const progressPanelTone =
     effectiveSession?.status === "completed"
-      ? "rounded-lg border border-emerald-300/60 bg-emerald-50/80 p-3 text-sm"
-      : "rounded-lg border border-brand-gold/40 bg-brand-gold/10 p-3 text-sm"
+      ? "rounded-lg border border-emerald-300/60 bg-emerald-50/80 p-3 text-[15px]"
+      : "rounded-lg border border-brand-gold/40 bg-brand-gold/10 p-3 text-[15px]"
   const resolvedErrorText = errorText
   const isSessionLoading = Boolean(
     sessionId && !effectiveSession && !resolvedErrorText && !isPolling,
@@ -647,10 +680,6 @@ function DashboardChatPageContent() {
         >
           <Card className="border-border/50 bg-card/90 backdrop-blur">
             <CardContent className="space-y-3 p-4 sm:p-5">
-              {isSessionListLoading ? (
-                <p className="text-sm text-muted-foreground">Loading chat sessions...</p>
-              ) : null}
-
               {sessionListError ? (
                 <p className="text-sm text-destructive">{sessionListError}</p>
               ) : null}
@@ -661,40 +690,91 @@ function DashboardChatPageContent() {
                 </p>
               ) : null}
 
-              <div className="space-y-2">
-                {sessionList.map((item) => {
-                  const updatedAtText = formatDateTime(item.updated_at) || "-"
-                  const dueAtText = formatDateTime(item.context.due_at_iso)
+              <AnimatePresence mode="wait" initial={false}>
+                {isSessionListLoading ? (
+                  <motion.div
+                    key="chat-list-loading"
+                    initial={reduceMotion ? false : { opacity: 0, y: 4 }}
+                    animate={reduceMotion ? undefined : { opacity: 1, y: 0 }}
+                    exit={reduceMotion ? undefined : { opacity: 0, y: -4 }}
+                    transition={reduceMotion ? undefined : { duration: 0.2, ease: EASE_OUT }}
+                    className="space-y-2"
+                  >
+                    <p className="text-sm text-muted-foreground">Loading chat sessions...</p>
+                    {Array.from({ length: 4 }).map((_, index) => (
+                      <motion.div
+                        key={`chat-loading-skeleton-${index}`}
+                        animate={
+                          reduceMotion
+                            ? undefined
+                            : {
+                                opacity: [0.38, 0.86, 0.38],
+                              }
+                        }
+                        transition={
+                          reduceMotion
+                            ? undefined
+                            : {
+                                duration: 1.3,
+                                ease: "easeInOut",
+                                repeat: Number.POSITIVE_INFINITY,
+                                delay: index * 0.08,
+                              }
+                        }
+                        className="rounded-xl border border-border/60 bg-background/40 p-3"
+                      >
+                        <div className="h-3 w-2/3 rounded bg-muted/80" />
+                        <div className="mt-2 h-2.5 w-1/3 rounded bg-muted/70" />
+                        <div className="mt-3 h-2.5 w-1/2 rounded bg-muted/70" />
+                      </motion.div>
+                    ))}
+                  </motion.div>
+                ) : null}
 
-                  return (
-                    <button
-                      key={item.session_id}
-                      type="button"
-                      onClick={() => handleOpenSession(item.session_id)}
-                      className="w-full rounded-xl border border-border/60 bg-background/50 p-3 text-left transition-colors hover:border-brand-blue/40 hover:bg-brand-blue/5"
-                    >
-                      <div className="flex flex-wrap items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-foreground">
-                            {item.context.assignment_title || item.title}
-                          </p>
-                          <p className="truncate text-xs text-muted-foreground">
-                            {item.context.course_name || "Unknown course"}
-                          </p>
-                        </div>
-                        <Badge variant="outline" className="capitalize">
-                          {item.status}
-                        </Badge>
-                      </div>
-                      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                        <span>Updated {updatedAtText}</span>
-                        {dueAtText ? <span>Due {dueAtText}</span> : null}
-                        <span>Attachments: {item.context.attachment_count}</span>
-                      </div>
-                    </button>
-                  )
-                })}
-              </div>
+                {!isSessionListLoading && sessionList.length > 0 ? (
+                  <motion.div
+                    key="chat-list-loaded"
+                    variants={CHAT_LIST_CONTAINER_VARIANTS}
+                    initial={reduceMotion ? false : "hidden"}
+                    animate={reduceMotion ? undefined : "show"}
+                    className="space-y-2"
+                  >
+                    {sessionList.map((item) => {
+                      const updatedAtText = formatDateTime(item.updated_at) || "-"
+                      const dueAtText = formatDateTime(item.context.due_at_iso)
+
+                      return (
+                        <motion.button
+                          key={item.session_id}
+                          type="button"
+                          variants={CHAT_LIST_ITEM_VARIANTS}
+                          onClick={() => handleOpenSession(item.session_id)}
+                          className="w-full rounded-xl border border-border/60 bg-background/50 p-3 text-left transition-colors hover:border-brand-blue/40 hover:bg-brand-blue/5"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold text-foreground">
+                                {item.context.assignment_title || item.title}
+                              </p>
+                              <p className="truncate text-xs text-muted-foreground">
+                                {item.context.course_name || "Unknown course"}
+                              </p>
+                            </div>
+                            <Badge variant="outline" className="capitalize">
+                              {item.status}
+                            </Badge>
+                          </div>
+                          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                            <span>Updated {updatedAtText}</span>
+                            {dueAtText ? <span>Due {dueAtText}</span> : null}
+                            <span>Attachments: {item.context.attachment_count}</span>
+                          </div>
+                        </motion.button>
+                      )
+                    })}
+                  </motion.div>
+                ) : null}
+              </AnimatePresence>
             </CardContent>
           </Card>
         </motion.div>
@@ -824,7 +904,7 @@ function DashboardChatPageContent() {
           <CardContent className="flex min-h-0 flex-1 flex-col gap-3 p-4">
             <div ref={threadContainerRef} className="min-h-0 flex-1">
               <ScrollArea className="h-full rounded-xl border border-border/60 bg-gradient-to-b from-muted/15 via-card to-card">
-                <div className="mx-auto min-w-0 w-full max-w-5xl space-y-3 p-4 sm:px-6">
+                <div className="mx-auto min-w-0 w-full max-w-5xl space-y-3 p-4 sm:px-8 lg:px-10">
                 <AnimatePresence initial={false}>
                   {showProgressPanel && effectiveSession ? (
                     <motion.div
@@ -881,10 +961,10 @@ function DashboardChatPageContent() {
                       initial={reduceMotion ? false : { opacity: 0, y: 10 }}
                       animate={reduceMotion ? undefined : { opacity: 1, y: 0 }}
                       transition={reduceMotion ? undefined : { duration: 0.35, ease: EASE_OUT }}
-                      className="mx-auto w-full max-w-4xl min-w-0 p-1 text-left text-sm leading-6"
+                      className="mx-auto w-full max-w-4xl min-w-0 p-1 text-left text-[15px] leading-6"
                     >
-                    <div className="[&_a]:font-medium [&_a]:text-blue-600 [&_a]:underline [&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:italic [&_code]:break-words [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_h1]:mt-6 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:tracking-tight [&_h1:first-child]:mt-0 [&_h2]:mt-5 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:tracking-tight [&_h2:first-child]:mt-0 [&_h3]:mt-4 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:tracking-tight [&_h3:first-child]:mt-0 [&_h4]:mt-4 [&_h4]:text-base [&_h4]:font-semibold [&_hr]:my-6 [&_li]:my-1 [&_li]:break-words [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-3 [&_p]:break-words [&_pre]:my-3 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_strong]:font-semibold [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    <div className="[&_a]:font-medium [&_a]:text-blue-600 [&_a]:underline [&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:italic [&_code]:break-words [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_h1]:mt-6 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:tracking-tight [&_h1:first-child]:mt-0 [&_h2]:mt-5 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:tracking-tight [&_h2:first-child]:mt-0 [&_h3]:mt-4 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:tracking-tight [&_h3:first-child]:mt-0 [&_h4]:mt-4 [&_h4]:text-base [&_h4]:font-semibold [&_hr]:my-6 [&_li]:my-1 [&_li]:break-words [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-3 [&_p]:break-words [&_pre]:my-3 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_strong]:font-semibold [&_table]:w-full [&_table]:min-w-[28rem] [&_table]:border-separate [&_table]:border-spacing-0 [&_table]:rounded-md [&_table]:border [&_table]:border-border/70 [&_thead]:bg-muted/45 [&_th]:border-b [&_th]:border-border/70 [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:text-[13px] [&_th]:font-semibold [&_td]:border-b [&_td]:border-border/50 [&_td]:px-2 [&_td]:py-1.5 [&_td]:text-[13px] [&_tbody_tr:last-child_td]:border-b-0 [&_tbody_tr:nth-child(even)]:bg-muted/25 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
                         {guideMarkdown}
                       </ReactMarkdown>
                     </div>
@@ -893,7 +973,7 @@ function DashboardChatPageContent() {
                 </AnimatePresence>
 
                 {effectiveSession?.status === "failed" ? (
-                  <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                  <div className="rounded-md border border-red-200 bg-red-50 p-3 text-[15px] text-red-800">
                     Error generating guide: {effectiveSession.error || "Unknown error"}
                   </div>
                 ) : null}
@@ -925,8 +1005,8 @@ function DashboardChatPageContent() {
                       transition={reduceMotion ? undefined : { duration: 0.24, ease: EASE_OUT }}
                       className={
                         message.sender_role === "user"
-                          ? "ml-auto w-fit max-w-[85%] break-words rounded-2xl border border-zinc-500/70 bg-zinc-700/85 px-3 py-2 text-right text-sm text-zinc-50 shadow-sm sm:max-w-[75%] lg:max-w-[65%]"
-                          : "mx-auto w-full max-w-4xl px-1 py-1 text-left text-sm"
+                          ? "ml-auto w-fit max-w-[85%] break-words rounded-2xl border border-zinc-500/70 bg-zinc-700/85 px-3 py-2 text-right text-[15px] text-zinc-50 shadow-sm sm:max-w-[75%] lg:max-w-[65%]"
+                          : "mx-auto w-full max-w-4xl px-1 py-1 text-left text-[15px]"
                       }
                     >
                       {message.sender_role === "assistant" ? (
@@ -940,8 +1020,8 @@ function DashboardChatPageContent() {
                               ))
                             : null}
                           {assistantVisibleText ? (
-                            <div className="min-w-0 [&_a]:font-medium [&_a]:text-blue-600 [&_a]:underline [&_code]:break-words [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_hr]:my-6 [&_li]:break-words [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_p]:break-words [&_pre]:my-3 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5">
-                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            <div className="min-w-0 [&_a]:font-medium [&_a]:text-blue-600 [&_a]:underline [&_code]:break-words [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_hr]:my-6 [&_li]:break-words [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_p]:break-words [&_pre]:my-3 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_table]:w-full [&_table]:min-w-[28rem] [&_table]:border-separate [&_table]:border-spacing-0 [&_table]:rounded-md [&_table]:border [&_table]:border-border/70 [&_thead]:bg-muted/45 [&_th]:border-b [&_th]:border-border/70 [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:text-[13px] [&_th]:font-semibold [&_td]:border-b [&_td]:border-border/50 [&_td]:px-2 [&_td]:py-1.5 [&_td]:text-[13px] [&_tbody_tr:last-child_td]:border-b-0 [&_tbody_tr:nth-child(even)]:bg-muted/25 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5">
+                              <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
                                 {assistantVisibleText}
                               </ReactMarkdown>
                             </div>
@@ -970,7 +1050,7 @@ function DashboardChatPageContent() {
               <Button
                 type="submit"
                 disabled={draft.trim().length === 0 || !canSendMessage}
-                className="h-11 rounded-full border-0 bg-brand-blue px-4 text-primary-foreground transition-all duration-200 hover:bg-brand-blue/90 hover:shadow-[0_0_0_1px_rgba(255,255,255,0.06)_inset]"
+                className="h-11 w-11 rounded-full border-0 bg-transparent p-0 text-brand-blue transition-colors duration-200 hover:bg-brand-blue/12 hover:text-brand-blue/95"
               >
                 {isSending ? (
                   <LoaderCircle className="h-4 w-4 animate-spin" />
@@ -980,7 +1060,7 @@ function DashboardChatPageContent() {
               </Button>
             </form>
 
-            {resolvedErrorText ? <p className="text-sm text-destructive">{resolvedErrorText}</p> : null}
+            {resolvedErrorText ? <p className="text-[15px] text-destructive">{resolvedErrorText}</p> : null}
           </CardContent>
         </Card>
         </motion.div>

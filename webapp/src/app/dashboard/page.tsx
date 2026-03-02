@@ -196,7 +196,7 @@ export default function Dashboard() {
               </div>
               <Button asChild variant="ghost" size="sm" className="gap-1.5">
                 <Link href="/dashboard/chat">
-                  Open chats
+                  See All
                   <ArrowUpRight className="h-4 w-4" />
                 </Link>
               </Button>
