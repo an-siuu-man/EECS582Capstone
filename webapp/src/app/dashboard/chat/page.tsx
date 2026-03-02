@@ -4,7 +4,7 @@ import { type FormEvent, Suspense, useEffect, useMemo, useRef, useState } from "
 import { useSearchParams } from "next/navigation"
 import { format } from "date-fns"
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion"
-import { Bot, FileText, LoaderCircle, Send } from "lucide-react"
+import { Bot, LoaderCircle, Send } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 
@@ -83,12 +83,6 @@ type ChatSessionResponse = {
 const EASE_OUT = [0.22, 1, 0.36, 1] as const
 const THINK_OPEN_TAG = "<think>"
 const THINK_CLOSE_TAG = "</think>"
-const STATUS_BADGE_TONES = [
-  "border-emerald-400/60 bg-emerald-500/15 text-emerald-800 dark:text-emerald-200",
-  "border-sky-400/60 bg-sky-500/15 text-sky-800 dark:text-sky-200",
-  "border-violet-400/60 bg-violet-500/15 text-violet-800 dark:text-violet-200",
-  "border-rose-400/60 bg-rose-500/15 text-rose-800 dark:text-rose-200",
-] as const
 const STAGE_BADGE_TONES = [
   "border-cyan-400/60 bg-cyan-500/15 text-cyan-800 dark:text-cyan-200",
   "border-amber-400/60 bg-amber-500/15 text-amber-800 dark:text-amber-200",
@@ -129,11 +123,12 @@ function extractGuideMarkdown(result: unknown) {
 
 function removeThinkBlocks(markdown: string) {
   if (!markdown) {
-    return { visibleMarkdown: "", isThinking: false }
+    return { visibleMarkdown: "", isThinking: false, thinkBlockCount: 0 }
   }
 
   let cursor = 0
   let visible = ""
+  let thinkBlockCount = 0
 
   while (cursor < markdown.length) {
     const openIndex = markdown.indexOf(THINK_OPEN_TAG, cursor)
@@ -143,6 +138,7 @@ function removeThinkBlocks(markdown: string) {
     }
 
     visible += markdown.slice(cursor, openIndex)
+    thinkBlockCount += 1
     const thinkStart = openIndex + THINK_OPEN_TAG.length
     const closeIndex = markdown.indexOf(THINK_CLOSE_TAG, thinkStart)
 
@@ -150,6 +146,7 @@ function removeThinkBlocks(markdown: string) {
       return {
         visibleMarkdown: visible.replaceAll(THINK_CLOSE_TAG, ""),
         isThinking: true,
+        thinkBlockCount,
       }
     }
 
@@ -159,7 +156,28 @@ function removeThinkBlocks(markdown: string) {
   return {
     visibleMarkdown: visible.replaceAll(THINK_CLOSE_TAG, ""),
     isThinking: false,
+    thinkBlockCount,
   }
+}
+
+function ThinkingMessage({ reduceMotion }: { reduceMotion: boolean | null }) {
+  return (
+    <div className="inline-flex items-center text-sm font-medium text-muted-foreground">
+      {reduceMotion ? (
+        <span>Thinking</span>
+      ) : (
+        <span className="inline-grid">
+          <span className="[grid-area:1/1]">Thinking</span>
+          <span
+            aria-hidden="true"
+            className="thinking-shine-overlay pointer-events-none [grid-area:1/1]"
+          >
+            Thinking
+          </span>
+        </span>
+      )}
+    </div>
+  )
 }
 
 function stageLabel(stage: ChatSessionStage) {
@@ -216,8 +234,8 @@ function DashboardChatPageContent() {
   const [isSending, setIsSending] = useState(false)
   const [showProgressPanel, setShowProgressPanel] = useState(false)
   const [displayProgress, setDisplayProgress] = useState(0)
-  const [statusToneIndex, setStatusToneIndex] = useState(0)
   const [stageToneIndex, setStageToneIndex] = useState(0)
+  const [isContextDialogOpen, setIsContextDialogOpen] = useState(false)
   const threadContainerRef = useRef<HTMLDivElement | null>(null)
   const latestSessionRef = useRef<ChatSessionResponse | null>(null)
   const previousGuideLengthRef = useRef(0)
@@ -289,9 +307,6 @@ function DashboardChatPageContent() {
       if (isDisposed) return
       const previousSession = latestSessionRef.current
 
-      if (previousSession?.status && previousSession.status !== nextSession.status) {
-        setStatusToneIndex((prev) => (prev + 1) % STATUS_BADGE_TONES.length)
-      }
       if (previousSession?.stage && previousSession.stage !== nextSession.stage) {
         setStageToneIndex((prev) => (prev + 1) % STAGE_BADGE_TONES.length)
       }
@@ -463,17 +478,20 @@ function DashboardChatPageContent() {
     return extractGuideMarkdown(effectiveSession.result)
   }, [effectiveSession])
 
-  const { visibleMarkdown: guideMarkdown, isThinking } = useMemo(
+  const {
+    visibleMarkdown: guideMarkdown,
+    isThinking,
+    thinkBlockCount: guideThinkBlockCount,
+  } = useMemo(
     () => removeThinkBlocks(rawGuideMarkdown),
     [rawGuideMarkdown],
   )
 
   const hasGuideContent = guideMarkdown.trim().length > 0
+  const isGuideStreaming =
+    effectiveSession?.status === "running" || effectiveSession?.status === "queued"
   const showThinkingIndicator = Boolean(
-    effectiveSession &&
-      (effectiveSession.status === "running" || effectiveSession.status === "queued") &&
-      isThinking &&
-      !hasGuideContent,
+    !hasGuideContent && isGuideStreaming && (guideThinkBlockCount > 0 || isThinking),
   )
 
   useEffect(() => {
@@ -513,6 +531,28 @@ function DashboardChatPageContent() {
         effectiveSession.stage === "chat_streaming") &&
       !isSending,
   )
+  const latestAssistantMessageId = useMemo(() => {
+    const assistantMessages = (effectiveSession?.messages ?? []).filter(
+      (message) => message.sender_role === "assistant",
+    )
+    const latestMessage = assistantMessages[assistantMessages.length - 1]
+    return latestMessage?.id ?? null
+  }, [effectiveSession?.messages])
+
+  useEffect(() => {
+    if (!isContextDialogOpen) return
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsContextDialogOpen(false)
+      }
+    }
+
+    window.addEventListener("keydown", handleEscape)
+    return () => {
+      window.removeEventListener("keydown", handleEscape)
+    }
+  }, [isContextDialogOpen])
 
   async function handleSend(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -583,147 +623,40 @@ function DashboardChatPageContent() {
             The guide starts automatically after you click Generate Guide in the extension.
           </p>
         </div>
-        {effectiveSession ? (
-          <Badge variant="outline" className="w-fit border-brand-blue/40 bg-brand-blue/10 px-3 py-1.5 text-brand-blue">
-            {stageLabel(effectiveSession.stage)}
-          </Badge>
-        ) : null}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="border-border/70 bg-background/70"
+            onClick={() => setIsContextDialogOpen(true)}
+            disabled={!payload}
+          >
+            View Assignment Context
+          </Button>
+          {effectiveSession ? (
+            <Badge
+              variant="outline"
+              className="w-fit border-brand-blue/40 bg-brand-blue/10 px-3 py-1.5 text-brand-blue"
+            >
+              {stageLabel(effectiveSession.stage)}
+            </Badge>
+          ) : null}
+        </div>
       </motion.div>
 
       <motion.div
         initial={reduceMotion ? false : { opacity: 0, y: 10 }}
         animate={reduceMotion ? undefined : { opacity: 1, y: 0 }}
         transition={reduceMotion ? undefined : { duration: 0.4, ease: EASE_OUT, delay: 0.1 }}
-        className="grid items-start gap-4 lg:grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)]"
+        className="grid items-start gap-4"
       >
-        <motion.div
-          initial={reduceMotion ? false : { opacity: 0, x: -8 }}
-          animate={reduceMotion ? undefined : { opacity: 1, x: 0 }}
-          transition={reduceMotion ? undefined : { duration: 0.35, ease: EASE_OUT, delay: 0.15 }}
-          className="min-w-0"
-        >
-          <Card className="h-full border-border/50 bg-card/85 shadow-sm backdrop-blur">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <FileText className="h-4 w-4" />
-              Assignment Context
-            </CardTitle>
-            <CardDescription>Session from extension handoff</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm">
-            {isSessionLoading && !effectiveSession ? (
-              <p className="text-muted-foreground">Loading session...</p>
-            ) : null}
-
-            {!isSessionLoading && !payload ? (
-              <p className="text-destructive">No session payload available.</p>
-            ) : null}
-
-            {payload ? (
-              <>
-                <div>
-                  <p className="text-muted-foreground">Title</p>
-                  <p className="font-medium">{payload.title || "(untitled assignment)"}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Course</p>
-                  <p className="font-medium">{payload.courseName || String(payload.courseId || "-")}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="group/attachments relative inline-flex">
-                    <Badge variant="outline">Attachments: {attachmentCount}</Badge>
-                    <div className="pointer-events-none absolute left-0 top-[calc(100%+0.5rem)] z-30 w-max min-w-56 max-w-72 translate-y-1 rounded-lg border border-border/70 bg-popover/95 p-2 text-xs text-popover-foreground opacity-0 shadow-lg backdrop-blur transition-all duration-150 ease-out group-hover/attachments:translate-y-0 group-hover/attachments:opacity-100">
-                      {attachmentNames.length > 0 ? (
-                        <ul className="space-y-1">
-                          {attachmentNames.map((name, index) => (
-                            <li key={`${name}-${index}`} className="truncate text-muted-foreground">
-                              {name}
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p className="text-muted-foreground">No attachments provided.</p>
-                      )}
-                    </div>
-                  </div>
-                  {payload.rubric?.criteria?.length ? (
-                    <Badge variant="outline">Rubric: {payload.rubric.criteria.length}</Badge>
-                  ) : null}
-                </div>
-                {payload.dueAtISO ? (
-                  <div>
-                    <p className="text-muted-foreground">Due</p>
-                    <p className="font-medium">
-                      {format(new Date(payload.dueAtISO), "MMM d, yyyy h:mm a")}
-                    </p>
-                  </div>
-                ) : null}
-                {createdAtText ? (
-                  <div>
-                    <p className="text-muted-foreground">Session Created</p>
-                    <p className="font-medium">{createdAtText}</p>
-                  </div>
-                ) : null}
-                {effectiveSession ? (
-                  <>
-                    <div>
-                      <p className="text-muted-foreground">Status</p>
-                      <AnimatePresence mode="wait" initial={false}>
-                        <motion.div
-                          key={`status-${effectiveSession.status}-${statusToneIndex}`}
-                          initial={reduceMotion ? false : { opacity: 0, y: 6, scale: 0.95 }}
-                          animate={reduceMotion ? undefined : { opacity: 1, y: 0, scale: 1 }}
-                          exit={reduceMotion ? undefined : { opacity: 0, y: -6, scale: 0.95 }}
-                          transition={reduceMotion ? undefined : { duration: 0.24, ease: EASE_OUT }}
-                          className="mt-1 inline-flex"
-                        >
-                          <Badge
-                            variant="outline"
-                            className={`px-2.5 py-1 text-xs font-semibold capitalize transition-colors duration-500 ${STATUS_BADGE_TONES[statusToneIndex]}`}
-                          >
-                            {effectiveSession.status}
-                          </Badge>
-                        </motion.div>
-                      </AnimatePresence>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">Stage</p>
-                      <AnimatePresence mode="wait" initial={false}>
-                        <motion.div
-                          key={`stage-${effectiveSession.stage}-${stageToneIndex}`}
-                          initial={reduceMotion ? false : { opacity: 0, y: 6, scale: 0.95 }}
-                          animate={reduceMotion ? undefined : { opacity: 1, y: 0, scale: 1 }}
-                          exit={reduceMotion ? undefined : { opacity: 0, y: -6, scale: 0.95 }}
-                          transition={reduceMotion ? undefined : { duration: 0.24, ease: EASE_OUT }}
-                          className="mt-1 inline-flex"
-                        >
-                          <Badge
-                            variant="outline"
-                            className={`px-2.5 py-1 text-xs font-semibold transition-colors duration-500 ${STAGE_BADGE_TONES[stageToneIndex]}`}
-                          >
-                            {stageLabel(effectiveSession.stage)}
-                          </Badge>
-                        </motion.div>
-                      </AnimatePresence>
-                    </div>
-                    {isPolling ? (
-                      <p className="text-xs text-muted-foreground">Reconnecting stream...</p>
-                    ) : null}
-                  </>
-                ) : null}
-              </>
-            ) : null}
-          </CardContent>
-        </Card>
-        </motion.div>
-
         <motion.div
           initial={reduceMotion ? false : { opacity: 0, x: 8 }}
           animate={reduceMotion ? undefined : { opacity: 1, x: 0 }}
           transition={reduceMotion ? undefined : { duration: 0.35, ease: EASE_OUT, delay: 0.18 }}
           className="min-w-0"
         >
-          <Card className="flex h-[min(70vh,780px)] min-h-[480px] min-w-0 flex-col border-border/50 bg-card/90 shadow-[0_18px_45px_-28px_rgba(15,23,42,0.55)] backdrop-blur">
+          <Card className="flex h-[min(72vh,820px)] min-h-[500px] min-w-0 flex-col border-border/50 bg-card/90 shadow-[0_18px_45px_-28px_rgba(15,23,42,0.55)] backdrop-blur">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Bot className="h-4 w-4" />
@@ -734,11 +667,7 @@ function DashboardChatPageContent() {
           <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
             <div ref={threadContainerRef} className="min-h-0 flex-1">
               <ScrollArea className="h-full rounded-xl border border-border/60 bg-gradient-to-b from-muted/15 via-card to-card">
-                <div className="space-y-3 p-4 pr-5">
-                <div className="rounded-lg border border-dashed border-brand-blue/35 bg-brand-blue/5 p-3 text-sm">
-                  Assignment context received from extension.
-                </div>
-
+                <div className="mx-auto min-w-0 w-full max-w-5xl space-y-3 p-4 sm:px-6">
                 <AnimatePresence initial={false}>
                   {showProgressPanel && effectiveSession ? (
                     <motion.div
@@ -747,7 +676,7 @@ function DashboardChatPageContent() {
                       animate={reduceMotion ? undefined : { opacity: 1, y: 0, scale: 1 }}
                       exit={reduceMotion ? undefined : { opacity: 0, y: -8, scale: 0.98 }}
                       transition={reduceMotion ? undefined : { duration: 0.28, ease: EASE_OUT }}
-                      className={progressPanelTone}
+                      className={`${progressPanelTone} mx-auto min-w-0 w-full max-w-4xl`}
                     >
                     <div className="mb-2 flex items-center justify-between gap-2">
                       <span className="inline-flex items-center gap-2 font-medium text-foreground">
@@ -771,21 +700,19 @@ function DashboardChatPageContent() {
                       animate={reduceMotion ? undefined : { opacity: 1, y: 0 }}
                       exit={reduceMotion ? undefined : { opacity: 0, y: -6 }}
                       transition={reduceMotion ? undefined : { duration: 0.28, ease: EASE_OUT }}
-                      className="rounded-xl border border-border/60 bg-card/90 px-4 py-3 text-sm shadow-[0_10px_30px_-22px_rgba(15,23,42,0.55)]"
+                      className="mx-auto w-full max-w-4xl space-y-1 px-1 py-1"
                     >
-                      {reduceMotion ? (
-                        <span className="font-medium text-muted-foreground">Thinking</span>
-                      ) : (
-                        <span className="inline-grid font-medium text-muted-foreground">
-                          <span className="[grid-area:1/1]">Thinking</span>
-                          <span
-                            aria-hidden="true"
-                            className="thinking-shine-overlay pointer-events-none [grid-area:1/1]"
-                          >
-                            Thinking
-                          </span>
-                        </span>
-                      )}
+                      {Array.from({
+                        length: Math.max(
+                          guideThinkBlockCount,
+                          isThinking ? 1 : 0,
+                        ),
+                      }).map((_, index) => (
+                        <ThinkingMessage
+                          key={`guide-thinking-${index}`}
+                          reduceMotion={reduceMotion}
+                        />
+                      ))}
                     </motion.div>
                   ) : null}
                 </AnimatePresence>
@@ -797,9 +724,9 @@ function DashboardChatPageContent() {
                       initial={reduceMotion ? false : { opacity: 0, y: 10 }}
                       animate={reduceMotion ? undefined : { opacity: 1, y: 0 }}
                       transition={reduceMotion ? undefined : { duration: 0.35, ease: EASE_OUT }}
-                      className="rounded-xl border border-border/60 bg-card p-4 text-sm leading-6 shadow-[0_16px_40px_-28px_rgba(15,23,42,0.55)]"
+                      className="mx-auto w-full max-w-4xl min-w-0 p-1 text-left text-sm leading-6"
                     >
-                    <div className="[&_a]:font-medium [&_a]:text-blue-600 [&_a]:underline [&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:italic [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_h1]:mt-6 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:tracking-tight [&_h1:first-child]:mt-0 [&_h2]:mt-5 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:tracking-tight [&_h2:first-child]:mt-0 [&_h3]:mt-4 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:tracking-tight [&_h3:first-child]:mt-0 [&_h4]:mt-4 [&_h4]:text-base [&_h4]:font-semibold [&_li]:my-1 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_strong]:font-semibold [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5">
+                    <div className="[&_a]:font-medium [&_a]:text-blue-600 [&_a]:underline [&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:italic [&_code]:break-words [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_h1]:mt-6 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:tracking-tight [&_h1:first-child]:mt-0 [&_h2]:mt-5 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:tracking-tight [&_h2:first-child]:mt-0 [&_h3]:mt-4 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:tracking-tight [&_h3:first-child]:mt-0 [&_h4]:mt-4 [&_h4]:text-base [&_h4]:font-semibold [&_li]:my-1 [&_li]:break-words [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-3 [&_p]:break-words [&_pre]:my-3 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_strong]:font-semibold [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>
                         {guideMarkdown}
                       </ReactMarkdown>
@@ -814,29 +741,63 @@ function DashboardChatPageContent() {
                   </div>
                 ) : null}
 
-                {(effectiveSession?.messages ?? []).map((message) => (
-                  <motion.div
-                    key={message.id}
-                    initial={reduceMotion ? false : { opacity: 0, y: 8 }}
-                    animate={reduceMotion ? undefined : { opacity: 1, y: 0 }}
-                    transition={reduceMotion ? undefined : { duration: 0.24, ease: EASE_OUT }}
-                    className={
-                      message.sender_role === "user"
-                        ? "ml-auto w-fit max-w-[85%] rounded-2xl border border-brand-blue/35 bg-brand-blue/10 px-3 py-2 text-sm text-blue-900 shadow-sm"
-                        : "max-w-[85%] rounded-2xl border border-border/70 bg-card px-3 py-2 text-sm shadow-sm"
-                    }
-                  >
-                    {message.sender_role === "assistant" ? (
-                      <div className="[&_a]:font-medium [&_a]:text-blue-600 [&_a]:underline [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                          {message.content_text || "..."}
-                        </ReactMarkdown>
-                      </div>
-                    ) : (
-                      <p className="whitespace-pre-wrap">{message.content_text}</p>
-                    )}
-                  </motion.div>
-                ))}
+                {(effectiveSession?.messages ?? []).map((message) => {
+                  const assistantThinkState =
+                    message.sender_role === "assistant"
+                      ? removeThinkBlocks(message.content_text || "")
+                      : null
+                  const assistantVisibleText = assistantThinkState?.visibleMarkdown.trim() || ""
+                  const isLatestStreamingAssistant =
+                    message.sender_role === "assistant" &&
+                    message.id === latestAssistantMessageId &&
+                    isSending
+                  const assistantThinkingCount = Math.max(
+                    assistantThinkState?.thinkBlockCount ?? 0,
+                    assistantThinkState?.isThinking ? 1 : 0,
+                  )
+                  const showAssistantThinking =
+                    isLatestStreamingAssistant &&
+                    !assistantVisibleText &&
+                    assistantThinkingCount > 0
+
+                  return (
+                    <motion.div
+                      key={message.id}
+                      initial={reduceMotion ? false : { opacity: 0, y: 8 }}
+                      animate={reduceMotion ? undefined : { opacity: 1, y: 0 }}
+                      transition={reduceMotion ? undefined : { duration: 0.24, ease: EASE_OUT }}
+                      className={
+                        message.sender_role === "user"
+                          ? "ml-auto w-fit max-w-[85%] break-words rounded-2xl border border-brand-blue/35 bg-brand-blue/10 px-3 py-2 text-right text-sm text-blue-900 shadow-sm sm:max-w-[75%] lg:max-w-[65%]"
+                          : "mx-auto w-full max-w-4xl px-1 py-1 text-left text-sm"
+                      }
+                    >
+                      {message.sender_role === "assistant" ? (
+                        <div className="space-y-2">
+                          {showAssistantThinking
+                            ? Array.from({ length: assistantThinkingCount }).map((_, index) => (
+                                <ThinkingMessage
+                                  key={`${message.id}-thinking-${index}`}
+                                  reduceMotion={reduceMotion}
+                                />
+                              ))
+                            : null}
+                          {assistantVisibleText ? (
+                            <div className="min-w-0 [&_a]:font-medium [&_a]:text-blue-600 [&_a]:underline [&_code]:break-words [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_li]:break-words [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_p]:break-words [&_pre]:my-3 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5">
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                {assistantVisibleText}
+                              </ReactMarkdown>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <p className="whitespace-pre-wrap break-words text-right">
+                          {message.content_text}
+                        </p>
+                      )}
+                    </motion.div>
+                  )
+                })}
                 </div>
               </ScrollArea>
             </div>
@@ -862,6 +823,137 @@ function DashboardChatPageContent() {
         </Card>
         </motion.div>
       </motion.div>
+
+      <AnimatePresence>
+        {isContextDialogOpen ? (
+          <motion.div
+            initial={reduceMotion ? false : { opacity: 0 }}
+            animate={reduceMotion ? undefined : { opacity: 1 }}
+            exit={reduceMotion ? undefined : { opacity: 0 }}
+            transition={reduceMotion ? undefined : { duration: 0.2, ease: EASE_OUT }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+            onClick={() => setIsContextDialogOpen(false)}
+          >
+            <motion.div
+              initial={reduceMotion ? false : { opacity: 0, y: 16, scale: 0.98 }}
+              animate={reduceMotion ? undefined : { opacity: 1, y: 0, scale: 1 }}
+              exit={reduceMotion ? undefined : { opacity: 0, y: 10, scale: 0.98 }}
+              transition={reduceMotion ? undefined : { duration: 0.24, ease: EASE_OUT }}
+              className="max-h-[85vh] w-full max-w-2xl overflow-hidden rounded-2xl border border-border/70 bg-card shadow-2xl"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="assignment-context-title"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-3 border-b border-border/70 px-5 py-4">
+                <div>
+                  <h2 id="assignment-context-title" className="text-lg font-semibold">
+                    Assignment Context
+                  </h2>
+                  <p className="text-sm text-muted-foreground">Session from extension handoff</p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIsContextDialogOpen(false)}
+                >
+                  Close
+                </Button>
+              </div>
+
+              <div className="max-h-[calc(85vh-88px)] overflow-y-auto px-5 py-4">
+                <div className="space-y-3 text-sm">
+                  {isSessionLoading && !effectiveSession ? (
+                    <p className="text-muted-foreground">Loading session...</p>
+                  ) : null}
+
+                  {!isSessionLoading && !payload ? (
+                    <p className="text-destructive">No session payload available.</p>
+                  ) : null}
+
+                  {payload ? (
+                    <>
+                      <div>
+                        <p className="text-muted-foreground">Title</p>
+                        <p className="font-medium">{payload.title || "(untitled assignment)"}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Course</p>
+                        <p className="font-medium">
+                          {payload.courseName || String(payload.courseId || "-")}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="outline">Attachments: {attachmentCount}</Badge>
+                        {payload.rubric?.criteria?.length ? (
+                          <Badge variant="outline">Rubric: {payload.rubric.criteria.length}</Badge>
+                        ) : null}
+                      </div>
+                      {attachmentNames.length > 0 ? (
+                        <div>
+                          <p className="text-muted-foreground">Attachment Files</p>
+                          <ul className="mt-1 list-disc space-y-1 pl-5 text-muted-foreground">
+                            {attachmentNames.map((name, index) => (
+                              <li key={`${name}-${index}`} className="break-all">
+                                {name}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : (
+                        <p className="text-muted-foreground">No attachments provided.</p>
+                      )}
+                      {payload.dueAtISO ? (
+                        <div>
+                          <p className="text-muted-foreground">Due</p>
+                          <p className="font-medium">
+                            {format(new Date(payload.dueAtISO), "MMM d, yyyy h:mm a")}
+                          </p>
+                        </div>
+                      ) : null}
+                      {createdAtText ? (
+                        <div>
+                          <p className="text-muted-foreground">Session Created</p>
+                          <p className="font-medium">{createdAtText}</p>
+                        </div>
+                      ) : null}
+                    </>
+                  ) : null}
+
+                  {effectiveSession ? (
+                    <>
+                      <div>
+                        <p className="text-muted-foreground">Stage</p>
+                        <AnimatePresence mode="wait" initial={false}>
+                          <motion.div
+                            key={`stage-dialog-${effectiveSession.stage}-${stageToneIndex}`}
+                            initial={reduceMotion ? false : { opacity: 0, y: 6, scale: 0.95 }}
+                            animate={reduceMotion ? undefined : { opacity: 1, y: 0, scale: 1 }}
+                            exit={reduceMotion ? undefined : { opacity: 0, y: -6, scale: 0.95 }}
+                            transition={reduceMotion ? undefined : { duration: 0.24, ease: EASE_OUT }}
+                            className="mt-1 inline-flex"
+                          >
+                            <Badge
+                              variant="outline"
+                              className={`px-2.5 py-1 text-xs font-semibold transition-colors duration-500 ${STAGE_BADGE_TONES[stageToneIndex]}`}
+                            >
+                              {stageLabel(effectiveSession.stage)}
+                            </Badge>
+                          </motion.div>
+                        </AnimatePresence>
+                      </div>
+                      {isPolling ? (
+                        <p className="text-xs text-muted-foreground">Reconnecting stream...</p>
+                      ) : null}
+                    </>
+                  ) : null}
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </motion.div>
   )
 }
