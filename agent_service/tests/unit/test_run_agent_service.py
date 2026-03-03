@@ -1,8 +1,12 @@
 import unittest
 from unittest.mock import patch
 
-from app.schemas.requests import RunAgentRequest
-from app.services.run_agent_service import run_agent_workflow
+from app.schemas.requests import ChatStreamRequest, RunAgentRequest
+from app.services.run_agent_service import (
+    run_agent_workflow,
+    stream_chat_workflow,
+    stream_run_agent_workflow,
+)
 
 SAMPLE_RESULT = {
     "guideMarkdown": "## Assignment Overview\n\nWrite a concise draft.",
@@ -50,6 +54,67 @@ class TestRunAgentService(unittest.TestCase):
         self.assertEqual(result, SAMPLE_RESULT)
         mock_extract.assert_called_once_with(req)
         mock_agent.assert_called_once_with(req.payload, "", visual_signals=[])
+
+    def test_stream_run_agent_workflow_emits_reasoning_deltas_and_completion_thinking(self):
+        req = self._build_request()
+
+        with patch(
+            "app.services.run_agent_service.extract_pdf_context",
+            return_value=("", []),
+        ), patch(
+            "app.services.run_agent_service._stream_headstart_agent_markdown",
+            return_value=iter(
+                [
+                    {"content_delta": "", "reasoning_delta": "thinking-1"},
+                    {"content_delta": "Guide body", "reasoning_delta": "thinking-2"},
+                ]
+            ),
+        ):
+            events = list(stream_run_agent_workflow(req, route_path="/api/v1/runs/stream"))
+
+        delta_events = [event for event in events if event.get("event") == "run.delta"]
+        self.assertGreaterEqual(len(delta_events), 2)
+        self.assertEqual(delta_events[0]["data"]["reasoning_delta"], "thinking-1")
+        self.assertEqual(delta_events[1]["data"]["delta"], "Guide body")
+        self.assertEqual(delta_events[1]["data"]["reasoning_delta"], "thinking-2")
+
+        completed_events = [event for event in events if event.get("event") == "run.completed"]
+        self.assertEqual(len(completed_events), 1)
+        completed = completed_events[0]["data"]
+        self.assertEqual(completed["guideMarkdown"], "Guide body")
+        self.assertEqual(completed["thinking_content"], "thinking-1thinking-2")
+
+    def test_stream_chat_workflow_emits_reasoning_deltas_and_completion_thinking(self):
+        req = ChatStreamRequest(
+            assignment_payload={"title": "HW1"},
+            guide_markdown="Guide body",
+            chat_history=[],
+            retrieval_context=[],
+            user_message="What should I do first?",
+        )
+
+        with patch(
+            "app.services.run_agent_service._stream_headstart_chat_answer",
+            return_value=iter(
+                [
+                    {"content_delta": "", "reasoning_delta": "think-a"},
+                    {"content_delta": "Start with milestone one.", "reasoning_delta": "think-b"},
+                ]
+            ),
+        ):
+            events = list(stream_chat_workflow(req, route_path="/api/v1/chats/stream"))
+
+        delta_events = [event for event in events if event.get("event") == "chat.delta"]
+        self.assertGreaterEqual(len(delta_events), 2)
+        self.assertEqual(delta_events[0]["data"]["reasoning_delta"], "think-a")
+        self.assertEqual(delta_events[1]["data"]["delta"], "Start with milestone one.")
+        self.assertEqual(delta_events[1]["data"]["reasoning_delta"], "think-b")
+
+        completed_events = [event for event in events if event.get("event") == "chat.completed"]
+        self.assertEqual(len(completed_events), 1)
+        completed = completed_events[0]["data"]
+        self.assertEqual(completed["assistant_message"], "Start with milestone one.")
+        self.assertEqual(completed["thinking_content"], "think-athink-b")
 
 
 if __name__ == "__main__":

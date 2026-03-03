@@ -21,10 +21,16 @@ Errors/Exceptions:
 from langchain_nvidia_ai_endpoints import ChatNVIDIA
 
 
-def build_nvidia_chat_client(model_name: str, temperature: float, max_tokens: int) -> ChatNVIDIA:
+def build_nvidia_chat_client(
+    model_name: str,
+    temperature: float,
+    max_tokens: int,
+    top_p: float,
+) -> ChatNVIDIA:
     """Create a configured ChatNVIDIA client."""
     return ChatNVIDIA(
         model=model_name,
         temperature=temperature,
         max_tokens=max_tokens,
+        top_p=top_p,
     )

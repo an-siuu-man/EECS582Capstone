@@ -126,6 +126,25 @@ def _normalize_markdown_output(text: str) -> str:
     return cleaned
 
 
+def _split_stream_chunk(chunk: object) -> tuple[str, str]:
+    """
+    Normalize orchestrator stream chunks.
+    Backward compatible with legacy string-only deltas.
+    """
+    if isinstance(chunk, str):
+        return chunk, ""
+
+    if isinstance(chunk, dict):
+        content_delta = chunk.get("content_delta", "")
+        reasoning_delta = chunk.get("reasoning_delta", "")
+        return (
+            content_delta if isinstance(content_delta, str) else "",
+            reasoning_delta if isinstance(reasoning_delta, str) else "",
+        )
+
+    return "", ""
+
+
 def stream_run_agent_workflow(req: RunAgentRequest, route_path: str) -> Generator[dict, None, None]:
     """
     Execute run workflow and emit typed stream events for SSE clients.
@@ -192,14 +211,22 @@ def stream_run_agent_workflow(req: RunAgentRequest, route_path: str) -> Generato
         chunks: list[str] = []
         chunk_count = 0
         char_count = 0
+        reasoning_char_count = 0
+        reasoning_chunks: list[str] = []
 
-        for delta in _stream_headstart_agent_markdown(req.payload, pdf_text, visual_signals):
-            if not delta:
+        for chunk in _stream_headstart_agent_markdown(req.payload, pdf_text, visual_signals):
+            delta, reasoning_delta = _split_stream_chunk(chunk)
+            if not delta and not reasoning_delta:
                 continue
 
-            chunks.append(delta)
+            if delta:
+                chunks.append(delta)
+                char_count += len(delta)
+            if reasoning_delta:
+                reasoning_chunks.append(reasoning_delta)
+                reasoning_char_count += len(reasoning_delta)
+
             chunk_count += 1
-            char_count += len(delta)
             progress = min(94, 66 + round(28 * (1 - math.exp(-chunk_count / 18))))
 
             yield _build_event(
@@ -209,8 +236,10 @@ def stream_run_agent_workflow(req: RunAgentRequest, route_path: str) -> Generato
                     "progress_percent": progress,
                     "status_message": "Generating guide",
                     "delta": delta,
+                    "reasoning_delta": reasoning_delta,
                     "chunk_index": chunk_count,
                     "accumulated_chars": char_count,
+                    "reasoning_accumulated_chars": reasoning_char_count,
                 },
             )
 
@@ -233,16 +262,21 @@ def stream_run_agent_workflow(req: RunAgentRequest, route_path: str) -> Generato
             }
         ).model_dump()
 
-        logger.info("Streaming agent completed | markdown_len=%d", len(guide_markdown))
-        yield _build_event(
-            "run.completed",
-            {
-                **result,
-                "stage": "completed",
-                "progress_percent": 100,
-                "status_message": "Guide ready",
-            },
+        logger.info(
+            "Streaming agent completed | markdown_len=%d reasoning_len=%d",
+            len(guide_markdown),
+            reasoning_char_count,
         )
+        completed_payload = {
+            **result,
+            "stage": "completed",
+            "progress_percent": 100,
+            "status_message": "Guide ready",
+        }
+        thinking_content = "".join(reasoning_chunks).strip()
+        if thinking_content:
+            completed_payload["thinking_content"] = thinking_content
+        yield _build_event("run.completed", completed_payload)
     except Exception as exc:
         logger.exception("Streaming run failed")
         yield _build_event(
@@ -286,20 +320,28 @@ def stream_chat_workflow(req: ChatStreamRequest, route_path: str) -> Generator[d
         chunks: list[str] = []
         chunk_count = 0
         char_count = 0
+        reasoning_char_count = 0
+        reasoning_chunks: list[str] = []
 
-        for delta in _stream_headstart_chat_answer(
+        for chunk in _stream_headstart_chat_answer(
             assignment_payload=req.assignment_payload,
             guide_markdown=req.guide_markdown,
             chat_history=[item.model_dump() for item in req.chat_history],
             retrieval_context=[item.model_dump() for item in req.retrieval_context],
             user_message=req.user_message,
         ):
-            if not delta:
+            delta, reasoning_delta = _split_stream_chunk(chunk)
+            if not delta and not reasoning_delta:
                 continue
 
-            chunks.append(delta)
+            if delta:
+                chunks.append(delta)
+                char_count += len(delta)
+            if reasoning_delta:
+                reasoning_chunks.append(reasoning_delta)
+                reasoning_char_count += len(reasoning_delta)
+
             chunk_count += 1
-            char_count += len(delta)
             progress = min(99, 97 + round(2 * (1 - math.exp(-chunk_count / 8))))
 
             yield _build_event(
@@ -309,8 +351,10 @@ def stream_chat_workflow(req: ChatStreamRequest, route_path: str) -> Generator[d
                     "progress_percent": progress,
                     "status_message": "Generating follow-up response",
                     "delta": delta,
+                    "reasoning_delta": reasoning_delta,
                     "chunk_index": chunk_count,
                     "accumulated_chars": char_count,
+                    "reasoning_accumulated_chars": reasoning_char_count,
                 },
             )
 
@@ -324,16 +368,21 @@ def stream_chat_workflow(req: ChatStreamRequest, route_path: str) -> Generator[d
             }
         ).model_dump()
 
-        logger.info("Streaming chat completed | chars=%d", len(assistant_message))
-        yield _build_event(
-            "chat.completed",
-            {
-                "assistant_message": result["assistantMessage"],
-                "stage": "completed",
-                "progress_percent": 100,
-                "status_message": "Response ready",
-            },
+        logger.info(
+            "Streaming chat completed | chars=%d reasoning_len=%d",
+            len(assistant_message),
+            reasoning_char_count,
         )
+        completed_payload = {
+            "assistant_message": result["assistantMessage"],
+            "stage": "completed",
+            "progress_percent": 100,
+            "status_message": "Response ready",
+        }
+        thinking_content = "".join(reasoning_chunks).strip()
+        if thinking_content:
+            completed_payload["thinking_content"] = thinking_content
+        yield _build_event("chat.completed", completed_payload)
     except Exception as exc:
         logger.exception("Streaming chat failed")
         yield _build_event(

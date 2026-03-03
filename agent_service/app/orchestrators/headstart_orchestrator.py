@@ -27,7 +27,7 @@ import re
 import time
 from typing import Any, Iterator, Optional
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 
 from ..clients.llm_client import build_nvidia_chat_client
@@ -37,11 +37,16 @@ from ..schemas.responses import RunAgentResponse
 logger = get_logger("headstart.agent")
 
 MODEL_NAME = "nvidia/llama-3.3-nemotron-super-49b-v1.5"
-TEMPERATURE = 0.3
-MAX_OUTPUT_TOKENS = 8192
+TEMPERATURE = 0.6
+TOP_P = 0.95
+MAX_OUTPUT_TOKENS = 65536
+FREQUENCY_PENALTY = 0
+PRESENCE_PENALTY = 0
+THINKING_MODE_ENABLED = True
 MAX_RETRIES = 2
 
-SYSTEM_PROMPT = """\
+SYSTEM_PROMPT = """
+<Use advanced Reasoning>
 You are an academic assistant helping a student understand a Canvas assignment.
 
 Your job is to analyze the assignment details and any attached file contents,
@@ -66,7 +71,7 @@ Output requirement:
 
 Important: When the payload includes a "userTimezone" field, use that timezone for ALL dates
 and times in your output (milestones, deadlines, etc.). Format dates clearly, e.g.
-"Feb 15, 11:59 PM EST". If no timezone is provided, use the due date as-is.\
+"Feb 15, 11:59 PM". If no timezone is provided, use the due date as-is.\
 """
 
 HUMAN_TEMPLATE = """\
@@ -120,6 +125,78 @@ def _to_text(x):
     if content is not None:
         return _to_text(content)
     return str(x)
+
+
+def _extract_reasoning_content(x: Any) -> str:
+    """Read provider reasoning content from invoke/stream responses when available."""
+    if x is None:
+        return ""
+    if isinstance(x, list):
+        return "\n".join(_extract_reasoning_content(i) for i in x)
+    if isinstance(x, dict):
+        direct = x.get("reasoning_content")
+        if direct is not None:
+            return _to_text(direct)
+        nested = x.get("additional_kwargs")
+        if isinstance(nested, dict):
+            nested_reasoning = nested.get("reasoning_content")
+            if nested_reasoning is not None:
+                return _to_text(nested_reasoning)
+
+    additional_kwargs = getattr(x, "additional_kwargs", None)
+    if isinstance(additional_kwargs, dict):
+        reasoning = additional_kwargs.get("reasoning_content")
+        if reasoning is not None:
+            return _to_text(reasoning)
+
+    message = getattr(x, "message", None)
+    if message is not None:
+        return _extract_reasoning_content(message)
+
+    return ""
+
+
+def _compute_stream_delta(new_text: str, existing_text: str) -> tuple[str, str]:
+    """
+    Compute incremental stream delta.
+    Supports providers that stream cumulative content and providers that stream deltas.
+    """
+    if not new_text:
+        return "", existing_text
+    if new_text.startswith(existing_text):
+        return new_text[len(existing_text) :], new_text
+    return new_text, f"{existing_text}{new_text}"
+
+
+def _request_kwargs(include_thinking: bool = False) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {
+        "frequency_penalty": FREQUENCY_PENALTY,
+        "presence_penalty": PRESENCE_PENALTY,
+    }
+    if include_thinking:
+        kwargs["thinking_mode"] = THINKING_MODE_ENABLED
+    return kwargs
+
+
+def _stream_message_deltas(
+    llm: Any,
+    messages: list[BaseMessage],
+    include_thinking: bool = False,
+) -> Iterator[dict[str, str]]:
+    """Yield both answer deltas and reasoning deltas from provider streaming."""
+    seen_content = ""
+    seen_reasoning = ""
+    for chunk in llm.stream(messages, **_request_kwargs(include_thinking=include_thinking)):
+        content_delta, seen_content = _compute_stream_delta(_to_text(chunk), seen_content)
+        reasoning_delta, seen_reasoning = _compute_stream_delta(
+            _extract_reasoning_content(chunk),
+            seen_reasoning,
+        )
+        if content_delta or reasoning_delta:
+            yield {
+                "content_delta": content_delta,
+                "reasoning_delta": reasoning_delta,
+            }
 
 
 def _maybe_unwrap_text_dict(text: str) -> str:
@@ -239,7 +316,7 @@ def _try_structured_output(
         logger.info("Invoking structured output chain…")
         t0 = time.time()
 
-        response = structured_llm.invoke(messages)
+        response = structured_llm.invoke(messages, **_request_kwargs())
 
         elapsed_ms = int((time.time() - t0) * 1000)
         logger.info("Structured output returned in %dms", elapsed_ms)
@@ -296,22 +373,19 @@ Attached file contents:
         ]
     )
 
-    chain = prompt | llm
-
     last_error = None
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             logger.info("Prompt-based attempt %d/%d…", attempt, MAX_RETRIES)
             t0 = time.time()
-
-            res = chain.invoke(
-                {
-                    "payload": payload_str,
-                    "pdf_text": pdf_text_str,
-                    "timezone": timezone_str,
-                    "visual_signals": visual_signals_str,
-                }
+            messages = prompt.format_messages(
+                payload=payload_str,
+                pdf_text=pdf_text_str,
+                timezone=timezone_str,
+                visual_signals=visual_signals_str,
             )
+
+            res = llm.invoke(messages, **_request_kwargs())
 
             elapsed_ms = int((time.time() - t0) * 1000)
             logger.info("LLM returned in %dms (attempt %d)", elapsed_ms, attempt)
@@ -345,9 +419,10 @@ def run_headstart_agent(payload: dict, pdf_text: str = "", visual_signals: Optio
         raise RuntimeError("NVIDIA_API_KEY is not set")
 
     logger.info(
-        "Initializing LLM | model=%s temperature=%s max_tokens=%d",
+        "Initializing LLM | model=%s temperature=%s top_p=%s max_tokens=%d",
         MODEL_NAME,
         TEMPERATURE,
+        TOP_P,
         MAX_OUTPUT_TOKENS,
     )
 
@@ -355,6 +430,7 @@ def run_headstart_agent(payload: dict, pdf_text: str = "", visual_signals: Optio
         model_name=MODEL_NAME,
         temperature=TEMPERATURE,
         max_tokens=MAX_OUTPUT_TOKENS,
+        top_p=TOP_P,
     )
 
     payload_str = json.dumps(payload, ensure_ascii=False)
@@ -406,23 +482,22 @@ def _extract_markdown_payload(text: str) -> str:
     return cleaned
 
 
-def _build_markdown_chain(llm):
-    prompt = ChatPromptTemplate.from_messages(
+def _build_markdown_prompt() -> ChatPromptTemplate:
+    return ChatPromptTemplate.from_messages(
         [
             ("system", SYSTEM_PROMPT_MARKDOWN),
             ("human", HUMAN_TEMPLATE),
         ]
     )
-    return prompt | llm
 
 
 def stream_headstart_agent_markdown(
     payload: dict,
     pdf_text: str = "",
     visual_signals: Optional[list[dict]] = None,
-) -> Iterator[str]:
+) -> Iterator[dict[str, str]]:
     """
-    Stream markdown chunks from the model when provider streaming is available.
+    Stream markdown and reasoning chunks from the model when provider streaming is available.
     Falls back to a single invoke split into chunks when needed.
     """
     api_key = os.getenv("NVIDIA_API_KEY")
@@ -430,9 +505,10 @@ def stream_headstart_agent_markdown(
         raise RuntimeError("NVIDIA_API_KEY is not set")
 
     logger.info(
-        "Initializing streaming LLM | model=%s temperature=%s max_tokens=%d",
+        "Initializing streaming LLM | model=%s temperature=%s top_p=%s max_tokens=%d",
         MODEL_NAME,
         TEMPERATURE,
+        TOP_P,
         MAX_OUTPUT_TOKENS,
     )
 
@@ -440,58 +516,59 @@ def stream_headstart_agent_markdown(
         model_name=MODEL_NAME,
         temperature=TEMPERATURE,
         max_tokens=MAX_OUTPUT_TOKENS,
+        top_p=TOP_P,
     )
-    chain = _build_markdown_chain(llm)
+    prompt = _build_markdown_prompt()
 
     payload_str = json.dumps(payload, ensure_ascii=False)
     pdf_text_str = pdf_text or "(no attached files)"
     timezone_str = payload.get("userTimezone") or "Not specified (use due date as-is)"
     visual_signals_str = _format_visual_signals_for_prompt(visual_signals)
-    inputs = {
-        "payload": payload_str,
-        "pdf_text": pdf_text_str,
-        "timezone": timezone_str,
-        "visual_signals": visual_signals_str,
-    }
+    messages = prompt.format_messages(
+        payload=payload_str,
+        pdf_text=pdf_text_str,
+        timezone=timezone_str,
+        visual_signals=visual_signals_str,
+    )
 
     has_streamed_content = False
-    streamed_text = ""
     try:
-        stream_fn = getattr(chain, "stream", None)
-        if callable(stream_fn):
-            logger.info("Streaming markdown response from provider")
-            for chunk in stream_fn(inputs):
-                chunk_text = _to_text(chunk)
-                if not chunk_text:
-                    continue
-                if chunk_text.startswith(streamed_text):
-                    delta = chunk_text[len(streamed_text) :]
-                else:
-                    delta = chunk_text
-
-                if not delta:
-                    continue
-
-                streamed_text += delta
-                has_streamed_content = True
-                yield delta
+        logger.info(
+            "Streaming markdown response from provider | thinking_mode=%s",
+            THINKING_MODE_ENABLED,
+        )
+        for chunk in _stream_message_deltas(
+            llm,
+            messages,
+            include_thinking=True,
+        ):
+            has_streamed_content = True
+            yield chunk
     except Exception as exc:
         logger.warning("Provider streaming failed; falling back to single invoke: %s", repr(exc))
         has_streamed_content = False
-        streamed_text = ""
 
     if has_streamed_content:
         return
 
     logger.info("Using single invoke markdown fallback")
-    result = chain.invoke(inputs)
+    result = llm.invoke(messages, **_request_kwargs(include_thinking=True))
     markdown = _extract_markdown_payload(_to_text(result))
+    reasoning = _extract_reasoning_content(result).strip()
     if not markdown:
         raise RuntimeError("Model returned empty markdown output.")
 
     chunk_size = 900
+    for start in range(0, len(reasoning), chunk_size):
+        yield {
+            "content_delta": "",
+            "reasoning_delta": reasoning[start : start + chunk_size],
+        }
     for start in range(0, len(markdown), chunk_size):
-        yield markdown[start : start + chunk_size]
+        yield {
+            "content_delta": markdown[start : start + chunk_size],
+            "reasoning_delta": "",
+        }
 
 SYSTEM_PROMPT_CHAT = """\
 You are an academic assistant helping a student with follow-up questions about an assignment.
@@ -646,14 +723,13 @@ def _format_retrieval_context_for_prompt(retrieval_context: Optional[list[dict]]
     return "\n".join(lines) if lines else "(none)"
 
 
-def _build_followup_chat_chain(llm):
-    prompt = ChatPromptTemplate.from_messages(
+def _build_followup_chat_prompt() -> ChatPromptTemplate:
+    return ChatPromptTemplate.from_messages(
         [
             ("system", SYSTEM_PROMPT_CHAT),
             ("human", HUMAN_TEMPLATE_CHAT),
         ]
     )
-    return prompt | llm
 
 
 def stream_headstart_chat_answer(
@@ -662,9 +738,9 @@ def stream_headstart_chat_answer(
     chat_history: Optional[list[dict]] = None,
     retrieval_context: Optional[list[dict]] = None,
     user_message: str = "",
-) -> Iterator[str]:
+) -> Iterator[dict[str, str]]:
     """
-    Stream follow-up chat answer chunks from the model when provider streaming is available.
+    Stream follow-up chat answer and reasoning chunks when provider streaming is available.
     Falls back to single invoke chunking when needed.
     """
     api_key = os.getenv("NVIDIA_API_KEY")
@@ -672,9 +748,10 @@ def stream_headstart_chat_answer(
         raise RuntimeError("NVIDIA_API_KEY is not set")
 
     logger.info(
-        "Initializing follow-up chat LLM | model=%s temperature=%s max_tokens=%d",
+        "Initializing follow-up chat LLM | model=%s temperature=%s top_p=%s max_tokens=%d",
         MODEL_NAME,
         TEMPERATURE,
+        TOP_P,
         MAX_OUTPUT_TOKENS,
     )
 
@@ -682,8 +759,9 @@ def stream_headstart_chat_answer(
         model_name=MODEL_NAME,
         temperature=TEMPERATURE,
         max_tokens=MAX_OUTPUT_TOKENS,
+        top_p=TOP_P,
     )
-    chain = _build_followup_chat_chain(llm)
+    prompt = _build_followup_chat_prompt()
 
     sanitized_payload = _sanitize_assignment_payload_for_chat(assignment_payload or {})
     payload_str = _truncate_for_chat(
@@ -716,53 +794,52 @@ def stream_headstart_chat_answer(
         len(user_message_str),
     )
 
-    inputs = {
-        "payload": payload_str,
-        "guide_markdown": guide_markdown_str,
-        "retrieval_context": retrieval_context_str,
-        "chat_history": chat_history_str,
-        "user_message": user_message_str,
-    }
+    messages = prompt.format_messages(
+        payload=payload_str,
+        guide_markdown=guide_markdown_str,
+        retrieval_context=retrieval_context_str,
+        chat_history=chat_history_str,
+        user_message=user_message_str,
+    )
 
     has_streamed_content = False
-    streamed_text = ""
     try:
-        stream_fn = getattr(chain, "stream", None)
-        if callable(stream_fn):
-            logger.info("Streaming follow-up chat response from provider")
-            for chunk in stream_fn(inputs):
-                chunk_text = _to_text(chunk)
-                if not chunk_text:
-                    continue
-
-                if chunk_text.startswith(streamed_text):
-                    delta = chunk_text[len(streamed_text) :]
-                else:
-                    delta = chunk_text
-
-                if not delta:
-                    continue
-
-                streamed_text += delta
-                has_streamed_content = True
-                yield delta
+        logger.info(
+            "Streaming follow-up chat response from provider | thinking_mode=%s",
+            THINKING_MODE_ENABLED,
+        )
+        for chunk in _stream_message_deltas(
+            llm,
+            messages,
+            include_thinking=True,
+        ):
+            has_streamed_content = True
+            yield chunk
     except Exception as exc:
         logger.warning(
             "Provider follow-up chat streaming failed; falling back to single invoke: %s",
             repr(exc),
         )
         has_streamed_content = False
-        streamed_text = ""
 
     if has_streamed_content:
         return
 
     logger.info("Using single invoke follow-up chat fallback")
-    result = chain.invoke(inputs)
+    result = llm.invoke(messages, **_request_kwargs(include_thinking=True))
     content = _extract_markdown_payload(_to_text(result))
+    reasoning = _extract_reasoning_content(result).strip()
     if not content:
         raise RuntimeError("Model returned empty follow-up response.")
 
     chunk_size = 900
+    for start in range(0, len(reasoning), chunk_size):
+        yield {
+            "content_delta": "",
+            "reasoning_delta": reasoning[start : start + chunk_size],
+        }
     for start in range(0, len(content), chunk_size):
-        yield content[start : start + chunk_size]
+        yield {
+            "content_delta": content[start : start + chunk_size],
+            "reasoning_delta": "",
+        }

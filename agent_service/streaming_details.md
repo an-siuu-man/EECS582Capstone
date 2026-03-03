@@ -73,13 +73,16 @@ Failure path:
   - `progress_percent`
   - `status_message`
   - `delta` (new markdown chunk only)
+  - `reasoning_delta` (optional streamed thinking chunk from model)
   - `chunk_index`
   - `accumulated_chars`
+  - `reasoning_accumulated_chars` (optional running count for thinking chunks)
 
 ### `run.completed`
 - Purpose: terminal success event.
 - Includes:
   - `guideMarkdown` (full final markdown body)
+  - `thinking_content` (optional full streamed thinking trace)
   - `stage` (`completed`)
   - `progress_percent` (`100`)
   - `status_message` (`Guide ready`)
