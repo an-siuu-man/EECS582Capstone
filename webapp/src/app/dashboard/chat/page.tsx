@@ -274,6 +274,13 @@ function formatDateTime(value: number | string | null | undefined) {
   return format(date, "MMM d, yyyy h:mm a")
 }
 
+function formatMessageTimestamp(value: string | null | undefined) {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  return format(date, "hh:mm a")
+}
+
 function ChatPageFallback() {
   return (
     <div className="space-y-6">
@@ -1198,6 +1205,7 @@ function DashboardChatPageContent() {
                     message.sender_role === "assistant"
                       ? removeThinkBlocks(message.content_text || "")
                       : null
+                  const messageTimestampText = formatMessageTimestamp(message.created_at)
                   const assistantVisibleText = assistantThinkState?.visibleMarkdown.trim() || ""
                   const isLatestStreamingAssistant =
                     message.sender_role === "assistant" &&
@@ -1247,6 +1255,17 @@ function DashboardChatPageContent() {
                           {message.content_text}
                         </p>
                       )}
+                      {messageTimestampText ? (
+                        <p
+                          className={
+                            message.sender_role === "user"
+                              ? "mt-1 text-right text-[11px] font-medium tracking-wide text-zinc-200/80"
+                              : "mt-1 text-left text-[11px] font-medium tracking-wide text-muted-foreground"
+                          }
+                        >
+                          {messageTimestampText}
+                        </p>
+                      ) : null}
                     </motion.div>
                   )
                 })}
