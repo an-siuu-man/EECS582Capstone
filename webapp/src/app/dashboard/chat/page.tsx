@@ -2,7 +2,7 @@
 
 import { type FormEvent, type KeyboardEvent as ReactKeyboardEvent, Suspense, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { format } from "date-fns"
+import { format, isSameDay } from "date-fns"
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion"
 import { LoaderCircle, SendHorizontal, Trash2 } from "lucide-react"
 import ReactMarkdown, { type Components } from "react-markdown"
@@ -278,6 +278,9 @@ function formatMessageTimestamp(value: string | null | undefined) {
   if (!value) return null
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return null
+  if (!isSameDay(date, new Date())) {
+    return format(date, "MMM d, yyyy hh:mm a")
+  }
   return format(date, "hh:mm a")
 }
 
