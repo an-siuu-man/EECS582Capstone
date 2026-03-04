@@ -4,7 +4,7 @@ import { type FormEvent, type KeyboardEvent as ReactKeyboardEvent, Suspense, use
 import { useRouter, useSearchParams } from "next/navigation"
 import { format } from "date-fns"
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion"
-import { LoaderCircle, Send } from "lucide-react"
+import { LoaderCircle, SendHorizontal } from "lucide-react"
 import ReactMarkdown, { type Components } from "react-markdown"
 import remarkGfm from "remark-gfm"
 
@@ -1134,12 +1134,12 @@ function DashboardChatPageContent() {
                       type="submit"
                       variant="ghost"
                       disabled={draft.trim().length === 0 || !canSendMessage}
-                      className="h-9 w-9 rounded-full p-0 text-brand-blue transition-colors duration-200 hover:bg-brand-blue/10 hover:text-brand-blue"
+                      className="h-9 w-9 rounded-full p-0 text-black transition-colors duration-200 hover:bg-foreground/10 hover:text-black disabled:text-black/40 dark:text-white dark:hover:text-white dark:disabled:text-white/40"
                     >
                       {isSending ? (
                         <LoaderCircle className="h-4 w-4 animate-spin" />
                       ) : (
-                        <Send className="h-4 w-4" />
+                        <SendHorizontal className="h-4 w-4" />
                       )}
                     </Button>
                   </form>

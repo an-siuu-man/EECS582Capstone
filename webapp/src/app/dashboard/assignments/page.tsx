@@ -351,7 +351,7 @@ function AssignmentList({
                 </div>
 
                 {assignment.is_submitted ? (
-                  <div className="flex items-center gap-1 rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-sm font-semibold text-emerald-800">
+                  <div className="inline-flex w-fit items-center gap-1 rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-sm font-semibold text-emerald-800">
                     <CheckCircle2 className="h-4 w-4" />
                     <span>Submitted</span>
                   </div>
