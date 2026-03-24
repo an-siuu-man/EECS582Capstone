@@ -5,11 +5,12 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { format } from "date-fns"
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion"
 import { Brain, LoaderCircle, SendHorizontal, Trash2 } from "lucide-react"
-import ReactMarkdown, { type Components } from "react-markdown"
+import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 
 import { ChatMessageBubble } from "@/components/chat/chat-message-bubble"
 import { GuideExportButton } from "@/components/chat/guide-export-button"
+import { MARKDOWN_COMPONENTS } from "@/components/chat/markdown-components"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -21,7 +22,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
 import { ScrollArea } from "@/components/ui/scroll-area"
 
@@ -141,18 +141,6 @@ const STAGE_BADGE_TONES = [
   "border-lime-400/60 bg-lime-500/15 text-lime-800 dark:text-lime-200",
   "border-indigo-400/60 bg-indigo-500/15 text-indigo-800 dark:text-indigo-200",
 ] as const
-const MARKDOWN_COMPONENTS: Components = {
-  table: (props) => {
-    const { node, ...tableProps } = props
-    void node
-    return (
-      <div className="my-3 w-full overflow-x-auto">
-        <table {...tableProps} />
-      </div>
-    )
-  },
-}
-
 function normalizeResult(result: unknown) {
   if (result == null) return result
   if (typeof result === "object") return result
@@ -313,6 +301,7 @@ function DashboardChatPageContent() {
   const [stageToneIndex, setStageToneIndex] = useState(0)
   const [isContextDialogOpen, setIsContextDialogOpen] = useState(false)
   const threadContainerRef = useRef<HTMLDivElement | null>(null)
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const latestSessionRef = useRef<ChatSessionResponse | null>(null)
   const latestAssistantMessageIdRef = useRef<string | null>(null)
   const previousGuideLengthRef = useRef(0)
@@ -1092,6 +1081,7 @@ function DashboardChatPageContent() {
         ),
       )
       setDraft("")
+      if (textareaRef.current) textareaRef.current.style.height = "auto"
       requestAnimationFrame(() => {
         scrollThreadToBottom("smooth")
       })
@@ -1102,8 +1092,18 @@ function DashboardChatPageContent() {
     }
   }
 
-  function handleDraftKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+  function handleDraftKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Tab") {
+      event.preventDefault()
+      const el = event.currentTarget
+      const start = el.selectionStart
+      const end = el.selectionEnd
+      el.setRangeText("\t", start, end, "end")
+      setDraft(el.value)
+      return
+    }
     if (event.key !== "Enter") return
+    if (event.shiftKey) return
     if (event.nativeEvent.isComposing) return
     if (!draft.trim()) return
     if (!canSendMessage || isSending) return
@@ -1233,7 +1233,7 @@ function DashboardChatPageContent() {
                       transition={reduceMotion ? undefined : { duration: 0.35, ease: EASE_OUT }}
                       className="mx-auto w-full max-w-4xl min-w-0 p-1 text-left text-[15px] leading-6"
                     >
-                    <div className="[&_a]:font-medium [&_a]:text-blue-600 [&_a]:underline [&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:italic [&_code]:break-words [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_h1]:mt-6 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:tracking-tight [&_h1:first-child]:mt-0 [&_h2]:mt-5 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:tracking-tight [&_h2:first-child]:mt-0 [&_h3]:mt-4 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:tracking-tight [&_h3:first-child]:mt-0 [&_h4]:mt-4 [&_h4]:text-base [&_h4]:font-semibold [&_hr]:my-6 [&_li]:my-1 [&_li]:break-words [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-3 [&_p]:break-words [&_pre]:my-3 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_strong]:font-semibold [&_table]:w-full [&_table]:min-w-[28rem] [&_table]:border-separate [&_table]:border-spacing-0 [&_table]:rounded-md [&_table]:border [&_table]:border-border/70 [&_thead]:bg-muted/45 [&_th]:border-b [&_th]:border-border/70 [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:text-[13px] [&_th]:font-semibold [&_td]:border-b [&_td]:border-border/50 [&_td]:px-2 [&_td]:py-1.5 [&_td]:text-[13px] [&_tbody_tr:last-child_td]:border-b-0 [&_tbody_tr:nth-child(even)]:bg-muted/25 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5">
+                    <div className="[font-family:var(--font-lexend)] [&_a]:font-medium [&_a]:text-blue-600 [&_a]:underline [&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:italic [&_code]:[font-family:var(--font-space-mono)] [&_code]:break-words [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_h1]:mt-6 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:tracking-tight [&_h1:first-child]:mt-0 [&_h2]:mt-5 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:tracking-tight [&_h2:first-child]:mt-0 [&_h3]:mt-4 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:tracking-tight [&_h3:first-child]:mt-0 [&_h4]:mt-4 [&_h4]:text-base [&_h4]:font-semibold [&_hr]:my-6 [&_li]:my-1 [&_li]:break-words [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-3 [&_p]:break-words [&_p]:font-light [&_pre]:[font-family:var(--font-space-mono)] [&_pre]:my-3 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_strong]:font-semibold [&_table]:w-full [&_table]:min-w-[28rem] [&_table]:border-separate [&_table]:border-spacing-0 [&_table]:rounded-md [&_table]:border [&_table]:border-border/70 [&_thead]:bg-muted/45 [&_th]:border-b [&_th]:border-border/70 [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:text-[13px] [&_th]:font-semibold [&_td]:border-b [&_td]:border-border/50 [&_td]:px-2 [&_td]:py-1.5 [&_td]:text-[13px] [&_tbody_tr:last-child_td]:border-b-0 [&_tbody_tr:nth-child(even)]:bg-muted/25 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5">
                       <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
                         {guideMarkdown}
                       </ReactMarkdown>
@@ -1286,7 +1286,7 @@ function DashboardChatPageContent() {
                   ) : null}
                   <form
                     onSubmit={handleSend}
-                    className="flex w-full items-center gap-2 rounded-full bg-background/92 px-2 py-2 shadow-[0_14px_32px_-20px_rgba(15,23,42,0.55)] backdrop-blur supports-[backdrop-filter]:bg-background/80"
+                    className="flex w-full items-end gap-2 rounded-2xl bg-background/92 px-2 py-2 shadow-[0_14px_32px_-20px_rgba(15,23,42,0.55)] backdrop-blur supports-[backdrop-filter]:bg-background/80 dark:border dark:border-zinc-700/70"
                   >
                     <Button
                       type="button"
@@ -1294,17 +1294,24 @@ function DashboardChatPageContent() {
                       aria-pressed={isThinkingModeEnabled}
                       disabled={isSending}
                       onClick={() => setIsThinkingModeEnabled((previous) => !previous)}
-                      className="h-9 rounded-full px-3 text-xs font-medium"
+                      className="h-9 shrink-0 rounded-full px-3 text-xs font-medium"
                     >
                       <Brain className="mr-1.5 h-3.5 w-3.5" />
                       {isThinkingModeEnabled ? "Thinking On" : "Thinking Off"}
                     </Button>
-                    <Input
+                    <textarea
+                      ref={textareaRef}
+                      rows={1}
                       value={draft}
-                      onChange={(event) => setDraft(event.target.value)}
+                      onChange={(event) => {
+                        setDraft(event.target.value)
+                        const el = event.target
+                        el.style.height = "auto"
+                        el.style.height = `${el.scrollHeight}px`
+                      }}
                       onKeyDown={handleDraftKeyDown}
                       placeholder="Ask a follow-up question..."
-                      className="h-10 rounded-full border-0 bg-transparent px-3 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                      className="min-h-10 max-h-40 w-full resize-none overflow-y-auto border-0 bg-transparent px-3 py-2.5 text-sm outline-none placeholder:text-muted-foreground"
                     />
                     <Button
                       type="submit"
