@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Download, FileText, FileDown } from "lucide-react"
+import { FileText, FileDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
 type GuideExportButtonProps = {
@@ -98,8 +98,8 @@ export function GuideExportButton({ guideMarkdown, assignmentTitle, courseName }
         className="gap-1.5 text-xs"
         onClick={() => setOpen((v) => !v)}
       >
-        <Download className="h-3.5 w-3.5" />
-        Export
+        <FileDown className="h-3.5 w-3.5" />
+        Export Guide
       </Button>
 
       {open && (
