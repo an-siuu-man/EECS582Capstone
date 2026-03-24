@@ -19,7 +19,7 @@
  */
 
 import type { Metadata } from "next";
-import { Nunito_Sans, Quattrocento } from "next/font/google";
+import { Nunito_Sans, Quattrocento, Lexend, Space_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 
@@ -35,6 +35,17 @@ const nunitoSans = Nunito_Sans({
   variable: "--font-body",
 });
 
+const lexend = Lexend({
+  subsets: ["latin"],
+  variable: "--font-lexend",
+});
+
+const spaceMono = Space_Mono({
+  weight: ["400", "700"],
+  subsets: ["latin"],
+  variable: "--font-space-mono",
+});
+
 export const metadata: Metadata = {
   title: "Headstart AI",
   description: "Your AI-powered assignment assistant.",
@@ -47,7 +58,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${quattrocento.variable} ${nunitoSans.variable} font-sans antialiased`}>
+      <body className={`${quattrocento.variable} ${nunitoSans.variable} ${lexend.variable} ${spaceMono.variable} font-sans antialiased`}>
         <ThemeProvider
           attribute="class"
           defaultTheme="system"
