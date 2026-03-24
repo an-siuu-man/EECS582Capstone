@@ -144,6 +144,11 @@ The default end-to-end flow is:
 - `GET /api/chat-session/:sessionId`
 - `GET /api/chat-session/:sessionId/events` (SSE)
 - `POST /api/run-agent` (legacy proxy path)
+- `GET /api/integrations/google-calendar`
+- `GET /api/integrations/google-calendar/connect`
+- `GET /api/integrations/google-calendar/callback`
+- `POST /api/integrations/google-calendar/disconnect`
+- `POST /api/integrations/google-calendar/events`
 
 ### Agent Service API
 
@@ -222,6 +227,12 @@ python -m pytest
 
 - `AGENT_SERVICE_URL`  
   Example: `http://localhost:8000`
+- `GOOGLE_OAUTH_CLIENT_ID`
+- `GOOGLE_OAUTH_CLIENT_SECRET`
+- `GOOGLE_OAUTH_REDIRECT_URI`  
+  Example: `http://localhost:3000/api/integrations/google-calendar/callback`
+- `GOOGLE_OAUTH_SCOPES`  
+  Example: `https://www.googleapis.com/auth/calendar.events openid email`
 
 ### `agent_service/.env`
 
