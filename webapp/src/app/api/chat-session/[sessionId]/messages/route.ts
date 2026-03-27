@@ -103,6 +103,7 @@ export async function POST(
       assistantMessageId: assistantMessage.id,
       userMessageContent: content,
       thinkingMode: thinkingMode === "thinking" ? "thinking" : "normal",
+      requestUrl: req.url,
     });
 
     const response = NextResponse.json({

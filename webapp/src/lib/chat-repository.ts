@@ -909,7 +909,7 @@ async function getPersistedSessionSnapshotWithMessageLimit(
       table: "assignment_snapshots",
       query: {
         id: eq(ingest.assignment_snapshot_id),
-        select: "id,raw_payload",
+        select: "id,assignment_id,raw_payload",
         limit: 1,
       },
     }),
@@ -940,6 +940,7 @@ async function getPersistedSessionSnapshotWithMessageLimit(
   return {
     sessionId: session.id,
     assignmentUuid: session.assignment_uuid,
+    assignmentRecordId: toOptionalString(snapshot.assignment_id),
     userId: session.user_id,
     createdAt: toEpoch(session.created_at),
     updatedAt: toEpoch(session.updated_at),
@@ -1251,17 +1252,13 @@ export async function findLatestExistingGuideForAssignment(input: {
     };
   }
 
-  const integrationRows = await selectMany<DbLmsIntegration>({
-    table: "lms_integrations",
-    query: {
-      user_id: eq(input.userId),
-      provider: eq("canvas"),
-      ...(normalizedDomain ? { instance_domain: eq(normalizedDomain) } : {}),
-      select: "id,user_id",
-      limit: 200,
-    },
+  const assignmentIds = await listOwnedAssignmentIdsByProviderPair({
+    userId: input.userId,
+    courseId: normalizedCourseId,
+    assignmentId: normalizedAssignmentId,
+    instanceDomain: normalizedDomain,
   });
-  if (integrationRows.length === 0) {
+  if (assignmentIds.length === 0) {
     return {
       exists: false,
       latestSessionId: null as string | null,
@@ -1270,45 +1267,6 @@ export async function findLatestExistingGuideForAssignment(input: {
     };
   }
 
-  const integrationIds = Array.from(new Set(integrationRows.map((row) => row.id)));
-  const courseRows = await selectMany<DbCourse>({
-    table: "courses",
-    query: {
-      integration_id: inList(integrationIds),
-      provider_course_id: eq(normalizedCourseId),
-      select: "id,integration_id",
-      limit: 200,
-    },
-  });
-  if (courseRows.length === 0) {
-    return {
-      exists: false,
-      latestSessionId: null as string | null,
-      latestSessionUpdatedAt: null as number | null,
-      status: null as ChatSessionStatus | null,
-    };
-  }
-
-  const courseIds = Array.from(new Set(courseRows.map((row) => row.id)));
-  const assignmentRows = await selectMany<DbAssignment>({
-    table: "assignments",
-    query: {
-      course_id: inList(courseIds),
-      provider_assignment_id: eq(normalizedAssignmentId),
-      select: "id,course_id",
-      limit: 200,
-    },
-  });
-  if (assignmentRows.length === 0) {
-    return {
-      exists: false,
-      latestSessionId: null as string | null,
-      latestSessionUpdatedAt: null as number | null,
-      status: null as ChatSessionStatus | null,
-    };
-  }
-
-  const assignmentIds = Array.from(new Set(assignmentRows.map((row) => row.id)));
   const snapshotRows = await selectMany<DbAssignmentSnapshot>({
     table: "assignment_snapshots",
     query: {
@@ -1401,6 +1359,106 @@ export async function findLatestExistingGuideForAssignment(input: {
     latestSessionUpdatedAt: fallbackMatch?.updatedAt ?? null,
     status: fallbackMatch?.status ?? null,
   };
+}
+
+async function listOwnedAssignmentIdsByProviderPair(input: {
+  userId: string;
+  courseId: string;
+  assignmentId: string;
+  instanceDomain?: string | null;
+}) {
+  const integrationRows = await selectMany<DbLmsIntegration>({
+    table: "lms_integrations",
+    query: {
+      user_id: eq(input.userId),
+      provider: eq("canvas"),
+      ...(input.instanceDomain ? { instance_domain: eq(input.instanceDomain) } : {}),
+      select: "id,user_id",
+      limit: 200,
+    },
+  });
+  if (integrationRows.length === 0) {
+    return [];
+  }
+
+  const integrationIds = Array.from(new Set(integrationRows.map((row) => row.id)));
+  const courseRows = await selectMany<DbCourse>({
+    table: "courses",
+    query: {
+      integration_id: inList(integrationIds),
+      provider_course_id: eq(input.courseId),
+      select: "id,integration_id",
+      limit: 200,
+    },
+  });
+  if (courseRows.length === 0) {
+    return [];
+  }
+
+  const courseIds = Array.from(new Set(courseRows.map((row) => row.id)));
+  const assignmentRows = await selectMany<DbAssignment>({
+    table: "assignments",
+    query: {
+      course_id: inList(courseIds),
+      provider_assignment_id: eq(input.assignmentId),
+      select: "id,course_id",
+      limit: 200,
+    },
+  });
+  return Array.from(new Set(assignmentRows.map((row) => row.id)));
+}
+
+export async function resolveAssignmentRecordIdForUser(input: {
+  userId: string;
+  courseId?: string | null;
+  assignmentId?: string | null;
+  assignmentUrl?: string | null;
+}) {
+  const courseFromPayload = toOptionalString(input.courseId);
+  const assignmentFromPayload = toOptionalString(input.assignmentId);
+  const assignmentUrl = toOptionalString(input.assignmentUrl);
+
+  let parsedCourseId: string | null = null;
+  let parsedAssignmentId: string | null = null;
+  let normalizedDomain: string | null = null;
+  if (assignmentUrl) {
+    normalizedDomain = extractDomainFromUrl(assignmentUrl).toLowerCase();
+    const urlMatch = assignmentUrl.match(/\/courses\/(\d+)\/assignments\/(\d+)/);
+    if (urlMatch) {
+      parsedCourseId = urlMatch[1] ?? null;
+      parsedAssignmentId = urlMatch[2] ?? null;
+    }
+  }
+
+  const normalizedCourseId = courseFromPayload ?? parsedCourseId;
+  const normalizedAssignmentId = assignmentFromPayload ?? parsedAssignmentId;
+  if (!normalizedCourseId || !normalizedAssignmentId) {
+    return null;
+  }
+
+  const scopedMatches = await listOwnedAssignmentIdsByProviderPair({
+    userId: input.userId,
+    courseId: normalizedCourseId,
+    assignmentId: normalizedAssignmentId,
+    instanceDomain: normalizedDomain,
+  });
+  if (scopedMatches.length > 0) {
+    return scopedMatches[0] ?? null;
+  }
+
+  if (normalizedDomain) {
+    const unscopedMatches = await listOwnedAssignmentIdsByProviderPair({
+      userId: input.userId,
+      courseId: normalizedCourseId,
+      assignmentId: normalizedAssignmentId,
+      instanceDomain: null,
+    });
+    if (unscopedMatches.length > 0) {
+      return unscopedMatches[0] ?? null;
+    }
+  }
+
+  return null;
 }
 
 export async function listAssignmentSubmissionStatesForUser(
@@ -1629,6 +1687,7 @@ export async function getSessionGuideAndHistory(sessionId: string) {
     messages: snapshot.messages,
     userId: snapshot.userId,
     assignmentUuid: snapshot.assignmentUuid,
+    assignmentRecordId: snapshot.assignmentRecordId ?? null,
   };
 }
 
@@ -1650,5 +1709,6 @@ export async function getSessionGuideAndRecentHistory(
     messages: snapshot.messages,
     userId: snapshot.userId,
     assignmentUuid: snapshot.assignmentUuid,
+    assignmentRecordId: snapshot.assignmentRecordId ?? null,
   };
 }

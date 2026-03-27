@@ -9,6 +9,7 @@ import {
   upsertConnectedGoogleCalendarIntegration,
   upsertDisconnectedGoogleCalendarIntegration,
 } from "@/lib/google-calendar-repository";
+import { invalidateAssignmentCalendarContextCache } from "@/lib/assignment-calendar-context";
 import {
   GOOGLE_CALENDAR_OAUTH_STATE_COOKIE,
   googleOAuthStateCookieOptions,
@@ -81,6 +82,7 @@ export async function GET(req: Request) {
       userId,
       lastError: "OAuth state mismatch.",
     }).catch(() => undefined);
+    invalidateAssignmentCalendarContextCache({ userId });
     const response = profileRedirect(req, "error", "state_mismatch");
     clearOAuthStateCookie(response);
     if (resolvedUser?.refreshedSession) {
@@ -94,6 +96,7 @@ export async function GET(req: Request) {
       userId,
       lastError: oauthError,
     }).catch(() => undefined);
+    invalidateAssignmentCalendarContextCache({ userId });
     const response = profileRedirect(req, "error", oauthError);
     clearOAuthStateCookie(response);
     if (resolvedUser?.refreshedSession) {
@@ -107,6 +110,7 @@ export async function GET(req: Request) {
       userId,
       lastError: "OAuth callback missing code.",
     }).catch(() => undefined);
+    invalidateAssignmentCalendarContextCache({ userId });
     const response = profileRedirect(req, "error", "missing_code");
     clearOAuthStateCookie(response);
     if (resolvedUser?.refreshedSession) {
@@ -135,6 +139,7 @@ export async function GET(req: Request) {
       scope: exchanged.scope,
       tokenExpiresAt: toExpiryIso(exchanged.expiresIn),
     });
+    invalidateAssignmentCalendarContextCache({ userId });
 
     const response = profileRedirect(req, "connected");
     clearOAuthStateCookie(response);
@@ -148,6 +153,7 @@ export async function GET(req: Request) {
       userId,
       lastError: message,
     }).catch(() => undefined);
+    invalidateAssignmentCalendarContextCache({ userId });
 
     const response = profileRedirect(req, "error", "oauth_callback_failed");
     clearOAuthStateCookie(response);
@@ -157,4 +163,3 @@ export async function GET(req: Request) {
     return response;
   }
 }
-

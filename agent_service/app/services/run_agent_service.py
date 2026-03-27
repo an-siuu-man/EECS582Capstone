@@ -335,7 +335,7 @@ def stream_chat_workflow(req: ChatStreamRequest, route_path: str) -> Generator[d
             retrieval_context=[item.model_dump() for item in req.retrieval_context],
             user_message=req.user_message,
             include_thinking=req.thinking_mode,
-            calendar_context=req.calendar_context,
+            calendar_context=req.calendar_context.model_dump() if req.calendar_context else None,
         ):
             delta, reasoning_delta = _split_stream_chunk(chunk)
             if not delta and not reasoning_delta:

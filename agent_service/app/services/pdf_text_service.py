@@ -25,10 +25,14 @@ import io
 import math
 import os
 import re
+import shutil
+import tempfile
 import urllib.error
 import urllib.request
+import uuid
 from collections import Counter
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any, Optional
 
 from ..core.logging import get_logger
@@ -43,6 +47,8 @@ MAX_SYMBOL_RATIO = 0.40
 
 OCR_RENDER_DPI = 240
 OCR_TESSERACT_CONFIG = "--oem 3 --psm 6"
+OCR_TESSERACT_FALLBACK_CONFIG = "--oem 3 --psm 11"
+OCR_SUCCESS_SCORE = 0.72
 
 HEADER_FOOTER_SAMPLE_LINES = 2
 HEADER_FOOTER_REPEAT_RATIO = 0.60
@@ -51,6 +57,9 @@ HEADER_FOOTER_MIN_PAGES = 3
 MAX_VISUAL_SIGNALS_PER_FILE = 40
 MAX_VISUAL_SIGNAL_TEXT_LEN = 140
 MIN_RECT_WORD_OVERLAP = 0.20
+MIN_USABLE_TEXT_SCORE = 0.28
+MIN_FALLBACK_NATIVE_SCORE = 0.12
+TEXT_SCORE_OCR_ADVANTAGE = 0.08
 
 
 def _env_float(name: str, fallback: float) -> float:
@@ -336,6 +345,19 @@ def _compute_text_quality(text: str) -> dict:
     }
 
 
+def _score_text_quality(text: str) -> float:
+    """Map text-quality metrics to a simple 0-1 score for native vs OCR selection."""
+    metrics = _compute_text_quality(text)
+    if metrics["chars"] == 0:
+        return 0.0
+
+    char_score = min(metrics["chars"] / 180.0, 1.0) * 0.25
+    word_score = min(metrics["words"] / 28.0, 1.0) * 0.25
+    alnum_score = max(0.0, min(metrics["alnum_ratio"], 1.0)) * 0.30
+    symbol_score = max(0.0, 1.0 - min(metrics["symbol_ratio"], 1.0)) * 0.20
+    return round(char_score + word_score + alnum_score + symbol_score, 3)
+
+
 def _should_ocr_page(native_text: str) -> bool:
     """Decide if a page should use OCR instead of native extraction."""
     metrics = _compute_text_quality(native_text)
@@ -473,28 +495,148 @@ def _normalize_page_text(text: str) -> str:
     return normalized.strip()
 
 
-def _extract_ocr_text_from_page(page, filename: str, page_number: int) -> str:
-    """OCR fallback for image-heavy pages. Returns empty text if OCR is unavailable."""
+def _text_token_overlap_ratio(left: str, right: str) -> float:
+    left_tokens = set(re.findall(r"[A-Za-z0-9]{2,}", (left or "").lower()))
+    right_tokens = set(re.findall(r"[A-Za-z0-9]{2,}", (right or "").lower()))
+    if not left_tokens or not right_tokens:
+        return 0.0
+    return len(left_tokens & right_tokens) / min(len(left_tokens), len(right_tokens))
+
+
+def _texts_substantially_overlap(left: str, right: str) -> bool:
+    return _text_token_overlap_ratio(left, right) >= 0.80
+
+
+def _merge_text_variants(primary_text: str, supplement_text: str) -> str:
+    """Append only non-duplicate lines from a secondary extraction pass."""
+    primary_lines = [ln.strip() for ln in (primary_text or "").splitlines() if ln.strip()]
+    supplement_lines = [ln.strip() for ln in (supplement_text or "").splitlines() if ln.strip()]
+    if not primary_lines:
+        return "\n".join(supplement_lines).strip()
+    if not supplement_lines:
+        return "\n".join(primary_lines).strip()
+
+    seen = {_normalize_match_line(line) for line in primary_lines if line.strip()}
+    merged = list(primary_lines)
+    for line in supplement_lines:
+        signature = _normalize_match_line(line)
+        if signature and signature in seen:
+            continue
+        merged.append(line)
+        if signature:
+            seen.add(signature)
+    return "\n".join(merged).strip()
+
+
+def _choose_page_text_variant(
+    native_text: str,
+    ocr_text: str,
+    ocr_attempted: bool,
+) -> tuple[str, str]:
+    """Choose the best page text and extraction mode from native/OCR candidates."""
+    native = _normalize_page_text(native_text)
+    ocr = _normalize_page_text(ocr_text)
+    native_score = _score_text_quality(native)
+    ocr_score = _score_text_quality(ocr)
+
+    if ocr:
+        if native:
+            if ocr_score >= native_score + TEXT_SCORE_OCR_ADVANTAGE:
+                if native_score >= MIN_USABLE_TEXT_SCORE and not _texts_substantially_overlap(ocr, native):
+                    return "hybrid", _merge_text_variants(ocr, native)
+                return "ocr", ocr
+            if (
+                native_score >= MIN_USABLE_TEXT_SCORE
+                and ocr_score >= MIN_USABLE_TEXT_SCORE
+                and not _texts_substantially_overlap(native, ocr)
+            ):
+                return "hybrid", _merge_text_variants(native, ocr)
+            return "native", native
+        return "ocr", ocr
+
+    if native:
+        if native_score >= MIN_USABLE_TEXT_SCORE:
+            return "native", native
+        if not ocr_attempted or native_score >= MIN_FALLBACK_NATIVE_SCORE:
+            return "native", native
+
+    return "none", ""
+
+
+@lru_cache(maxsize=1)
+def _ocr_runtime_status() -> tuple[bool, str]:
+    try:
+        import pytesseract
+        from PIL import Image  # noqa: F401
+    except ImportError:
+        return False, "missing_python_dependencies"
+
+    tesseract_path = shutil.which("tesseract")
+    if not tesseract_path:
+        return False, "tesseract_not_found"
+
+    try:
+        pytesseract.get_tesseract_version()
+    except Exception as e:
+        return False, f"tesseract_unavailable: {e}"
+
+    return True, tesseract_path
+
+
+def _extract_ocr_text_from_page(page, filename: str, page_number: int) -> tuple[str, str]:
+    """OCR fallback for image-heavy pages. Returns normalized text and OCR status."""
+    runtime_ready, runtime_detail = _ocr_runtime_status()
+    if not runtime_ready:
+        logger.warning(
+            "OCR unavailable for %r page %d: %s",
+            filename,
+            page_number,
+            runtime_detail,
+        )
+        return "", "unavailable"
+
     try:
         import pytesseract
         from PIL import Image, ImageOps
-    except ImportError:
-        logger.warning(
-            "OCR dependencies missing (pytesseract/Pillow); skipping OCR for %r page %d",
-            filename,
-            page_number,
-        )
-        return ""
 
-    try:
         pix = page.get_pixmap(dpi=OCR_RENDER_DPI, alpha=False)
         image = Image.open(io.BytesIO(pix.tobytes("png")))
         processed = ImageOps.autocontrast(image.convert("L"))
-        text = pytesseract.image_to_string(processed, config=OCR_TESSERACT_CONFIG)
-        return (text or "").strip()
+
+        best_text = ""
+        best_score = -1.0
+
+        for config in (OCR_TESSERACT_CONFIG, OCR_TESSERACT_FALLBACK_CONFIG):
+            try:
+                candidate = _normalize_page_text(
+                    pytesseract.image_to_string(processed, config=config)
+                )
+            except Exception as e:
+                logger.warning(
+                    "OCR failed for %r page %d with config %r: %s",
+                    filename,
+                    page_number,
+                    config,
+                    e,
+                )
+                continue
+
+            score = _score_text_quality(candidate)
+            if candidate and score > best_score:
+                best_text = candidate
+                best_score = score
+
+            if score >= OCR_SUCCESS_SCORE:
+                break
+
+        if best_text:
+            return best_text, "success"
+
+        logger.warning("OCR produced no usable text for %r page %d", filename, page_number)
+        return "", "failed"
     except Exception as e:
         logger.warning("OCR failed for %r page %d: %s", filename, page_number, e)
-        return ""
+        return "", "failed"
 
 
 def _extract_pages_and_visual_signals(pdf_bytes: bytes, filename: str) -> tuple[list[ExtractedPage], list[dict]]:
@@ -515,21 +657,38 @@ def _extract_pages_and_visual_signals(pdf_bytes: bytes, filename: str) -> tuple[
         with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
             for idx, page in enumerate(doc, start=1):
                 native_text = page.get_text("text") or ""
-                method = "native"
-                page_text = native_text
+                should_try_ocr = _should_ocr_page(native_text)
+                ocr_text = ""
+                ocr_status = "not_attempted"
+                if should_try_ocr:
+                    ocr_text, ocr_status = _extract_ocr_text_from_page(
+                        page,
+                        filename=filename,
+                        page_number=idx,
+                    )
 
-                if _should_ocr_page(native_text):
-                    ocr_text = _extract_ocr_text_from_page(page, filename=filename, page_number=idx)
-                    if ocr_text:
-                        method = "ocr"
-                        page_text = ocr_text
+                method, page_text = _choose_page_text_variant(
+                    native_text=native_text,
+                    ocr_text=ocr_text,
+                    ocr_attempted=should_try_ocr,
+                )
 
                 pages.append(
                     ExtractedPage(
                         number=idx,
                         method=method,
-                        text=_normalize_page_text(page_text),
+                        text=page_text,
                     )
+                )
+                logger.debug(
+                    "Page extraction %r page %d | method=%s | ocr_candidate=%s | ocr_status=%s | native_score=%.3f | ocr_score=%.3f",
+                    filename,
+                    idx,
+                    method,
+                    should_try_ocr,
+                    ocr_status,
+                    _score_text_quality(_normalize_page_text(native_text)),
+                    _score_text_quality(ocr_text),
                 )
 
                 if collect_visual:
@@ -655,6 +814,27 @@ def _download_pdf_from_storage_url(storage_url: str, filename: str) -> Optional[
     return None
 
 
+def _pdf_debug_dump_enabled() -> bool:
+    raw = os.getenv("ENABLE_PDF_DEBUG_DUMP", "false").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _maybe_dump_pdf_text(parts: list[str]) -> None:
+    if not parts or not _pdf_debug_dump_enabled():
+        return
+
+    dump_dir = (os.getenv("PDF_DEBUG_DUMP_DIR") or tempfile.gettempdir()).strip()
+    try:
+        os.makedirs(dump_dir, exist_ok=True)
+        dump_filename = f"headstart-pdf-extracted-{os.getpid()}-{uuid.uuid4().hex[:12]}.txt"
+        dump_path = os.path.join(dump_dir, dump_filename)
+        with open(dump_path, "w", encoding="utf-8") as f:
+            f.write("\n\n\n".join(parts))
+        logger.info("PDF text dumped to %s", dump_path)
+    except Exception as e:
+        logger.warning("Failed to write PDF debug dump to %r: %s", dump_dir, e)
+
+
 def extract_pdf_context(req: RunAgentRequest) -> tuple[str, list[dict]]:
     """
     Build combined PDF text and visual-emphasis signals from request attachments.
@@ -689,23 +869,13 @@ def extract_pdf_context(req: RunAgentRequest) -> tuple[str, list[dict]]:
         text, file_signals = extract_pdf_context_from_pdf_bytes(pdf_bytes, pdf_file.filename)
         if text:
             logger.info("PDF %r preview: %r", pdf_file.filename, text[:200])
-            parts.append(f"--- File: {pdf_file.filename} ---\\n{text}")
+            parts.append(f"--- File: {pdf_file.filename} ---\n{text}")
         if file_signals:
             visual_signals.extend(file_signals)
 
     visual_signals = _merge_visual_signals(visual_signals, limit=MAX_VISUAL_SIGNALS_PER_FILE)
 
-    if parts:
-        dump_path = os.path.join(
-            os.path.dirname(__file__),
-            "..",
-            "..",
-            "pdf_extracted_text.txt",
-        )
-        dump_path = os.path.normpath(dump_path)
-        with open(dump_path, "w", encoding="utf-8") as f:
-            f.write("\n\n\n".join(parts))
-        logger.info("PDF text dumped to %s", dump_path)
+    _maybe_dump_pdf_text(parts)
 
     return "\n\n".join(parts), visual_signals
 

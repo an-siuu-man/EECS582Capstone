@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { applyAuthCookies, resolveRequestUser } from "@/lib/auth/session";
+import { normalizeGoogleBusyWindow } from "@/lib/assignment-calendar-context";
 import { listCalendarAssignmentsForUser } from "@/lib/calendar-repository";
 import {
   GoogleCalendarApiError,
   listGoogleCalendarEvents,
-  type GoogleCalendarListedEvent,
 } from "@/lib/google-calendar";
 import { ensureGoogleCalendarAccessToken } from "@/lib/google-calendar-session";
 import { upsertNeedsAttentionGoogleCalendarIntegration } from "@/lib/google-calendar-repository";
@@ -182,36 +182,6 @@ function toSessionPriority(value: unknown): ProposalSuggestion["priority"] {
   if (value === "High") return "high";
   if (value === "Medium") return "medium";
   return "low";
-}
-
-function normalizeGoogleBusyWindow(event: GoogleCalendarListedEvent): PlannerBusyInterval | null {
-  if (event.status === "cancelled") {
-    return null;
-  }
-
-  if (event.start.dateTime) {
-    const start = parseIso(event.start.dateTime);
-    const end = parseIso(event.end.dateTime);
-    if (!start || !end || end.getTime() <= start.getTime()) return null;
-
-    return {
-      startISO: start.toISOString(),
-      endISO: end.toISOString(),
-    };
-  }
-
-  if (event.start.date) {
-    const start = parseIso(event.start.date);
-    const end = parseIso(event.end.date);
-    if (!start || !end || end.getTime() <= start.getTime()) return null;
-
-    return {
-      startISO: start.toISOString(),
-      endISO: end.toISOString(),
-    };
-  }
-
-  return null;
 }
 
 function isPointInRange(point: Date, rangeStart: Date, rangeEnd: Date) {

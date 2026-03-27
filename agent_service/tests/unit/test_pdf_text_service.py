@@ -5,6 +5,8 @@ from unittest.mock import patch
 from app.schemas.requests import RunAgentRequest
 from app.schemas.shared import PdfFile
 from app.services.pdf_text_service import (
+    _choose_page_text_variant,
+    _merge_text_variants,
     _merge_visual_signals,
     _normalize_page_text,
     _remove_repeated_headers_and_footers,
@@ -69,8 +71,7 @@ class TestPdfTextService(unittest.TestCase):
             out = extract_all_pdf_text(req)
 
         self.assertIn("legacy context", out)
-        self.assertIn("--- File: spec.pdf ---", out)
-        self.assertIn("--- Page 1 (native) ---", out)
+        self.assertIn("--- File: spec.pdf ---\n--- Page 1 (native) ---", out)
 
     def test_extract_pdf_context_returns_visual_signals(self):
         req = RunAgentRequest(
@@ -103,6 +104,32 @@ class TestPdfTextService(unittest.TestCase):
 
         self.assertIn("--- File: spec.pdf ---", text)
         self.assertEqual(signals, sample_signals)
+
+    def test_choose_page_text_variant_prefers_ocr_when_native_is_noise(self):
+        method, text = _choose_page_text_variant(
+            native_text="%%% $$$ ### @@ !! ?? **",
+            ocr_text="Assignment overview\nWrite a reflection on the reading and cite two examples.",
+            ocr_attempted=True,
+        )
+        self.assertEqual(method, "ocr")
+        self.assertIn("Assignment overview", text)
+
+    def test_choose_page_text_variant_returns_none_when_no_text_is_available(self):
+        method, text = _choose_page_text_variant(
+            native_text="",
+            ocr_text="",
+            ocr_attempted=True,
+        )
+        self.assertEqual(method, "none")
+        self.assertEqual(text, "")
+
+    def test_merge_text_variants_appends_unique_lines_only(self):
+        merged = _merge_text_variants(
+            "Question 1\nDescribe the algorithm",
+            "Question 1\nDescribe the algorithm\nShow your reasoning",
+        )
+        self.assertIn("Show your reasoning", merged)
+        self.assertEqual(merged.count("Question 1"), 1)
 
     def test_extract_pdf_context_supports_storage_url_files(self):
         req = RunAgentRequest(

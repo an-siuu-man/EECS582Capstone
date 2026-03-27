@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { applyAuthCookies, resolveRequestUser } from "@/lib/auth/session";
+import { invalidateAssignmentCalendarContextCache } from "@/lib/assignment-calendar-context";
 import { revokeGoogleToken } from "@/lib/google-calendar";
 import {
   getGoogleCalendarIntegration,
@@ -30,6 +31,7 @@ export async function POST(req: Request) {
       userId,
       lastError: revokeError,
     });
+    invalidateAssignmentCalendarContextCache({ userId });
 
     const response = NextResponse.json({
       ok: true,
