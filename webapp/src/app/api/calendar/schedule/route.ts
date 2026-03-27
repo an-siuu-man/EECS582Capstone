@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { applyAuthCookies, resolveRequestUser } from "@/lib/auth/session";
+import { invalidateAssignmentCalendarContextCache } from "@/lib/assignment-calendar-context";
 import { listCalendarAssignmentsForUser } from "@/lib/calendar-repository";
 import {
   createGoogleCalendarEvent,
@@ -200,6 +201,10 @@ export async function POST(req: Request) {
             userId,
             lastError: "Google authorization rejected by provider.",
           }).catch(() => undefined);
+          invalidateAssignmentCalendarContextCache({
+            userId,
+            assignmentId: assignment.assignmentId,
+          });
         }
 
         scheduledEvents.push({
@@ -215,6 +220,10 @@ export async function POST(req: Request) {
 
     const createdCount = scheduledEvents.filter((e) => e.status === "created").length;
     const failedCount = scheduledEvents.filter((e) => e.status === "failed").length;
+    invalidateAssignmentCalendarContextCache({
+      userId,
+      assignmentId: assignment.assignmentId,
+    });
 
     const response = NextResponse.json({
       assignment_id: assignmentId,

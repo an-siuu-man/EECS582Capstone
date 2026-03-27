@@ -44,6 +44,23 @@ type ScheduledEvent = {
 }
 
 type SlotsResponse = {
+  availability_reason:
+    | "available"
+    | "available_review_window"
+    | "no_slots_before_deadline"
+    | "no_slots_in_review_window"
+    | "calendar_disconnected"
+    | "calendar_needs_attention"
+    | "calendar_fetch_failed"
+    | "assignment_missing_due_date"
+    | "assignment_past_due"
+    | "assignment_unresolved"
+  integration: {
+    google: {
+      status: "connected" | "disconnected" | "needs_attention"
+      connected: boolean
+    }
+  }
   no_slots_found: boolean
   free_slots: FreeSlot[]
   recommended_sessions: RecommendedSession[]
@@ -80,6 +97,33 @@ function priorityBadgeTone(priority: "high" | "medium" | "low") {
   if (priority === "medium")
     return "border-amber-400/60 bg-amber-500/10 text-amber-700 dark:text-amber-300"
   return "border-blue-400/60 bg-blue-500/10 text-blue-700 dark:text-blue-300"
+}
+
+function availabilityMessage(
+  reason: SlotsResponse["availability_reason"],
+): string | null {
+  if (reason === "no_slots_before_deadline") {
+    return "Your calendar looks fully booked before this deadline."
+  }
+  if (reason === "no_slots_in_review_window") {
+    return "No free study slots were found in the next 7 days."
+  }
+  if (reason === "calendar_disconnected") {
+    return "Connect Google Calendar in your profile to generate study-time suggestions from your real schedule."
+  }
+  if (reason === "calendar_needs_attention") {
+    return "Reconnect Google Calendar in your profile before generating study-time suggestions."
+  }
+  if (reason === "calendar_fetch_failed") {
+    return "Google Calendar could not be read right now. Try again in a moment."
+  }
+  if (reason === "assignment_missing_due_date") {
+    return "This assignment does not have a usable due date, so study sessions cannot be suggested yet."
+  }
+  if (reason === "assignment_past_due") {
+    return "This assignment deadline has already passed."
+  }
+  return null
 }
 
 export function AssignmentSchedulePanel({
@@ -240,8 +284,8 @@ export function AssignmentSchedulePanel({
               className="space-y-3"
             >
               <p className="text-sm text-muted-foreground">
-                Find free time slots on your calendar before this assignment&apos;s deadline and schedule
-                study sessions.
+                Find free time slots on your calendar before this assignment&apos;s deadline, or in the
+                next 7 days for post-deadline review.
               </p>
               {errorText && (
                 <p className="flex items-center gap-1.5 text-xs text-destructive">
@@ -314,10 +358,11 @@ export function AssignmentSchedulePanel({
                 </div>
               )}
 
-              {slotsData.no_slots_found ? (
+              {slotsData.availability_reason !== "available" &&
+              slotsData.availability_reason !== "available_review_window" ? (
                 <div className="rounded-md border border-border/40 bg-muted/20 px-3 py-4 text-center">
                   <p className="text-sm text-muted-foreground">
-                    Your calendar looks fully booked before this deadline.
+                    {availabilityMessage(slotsData.availability_reason)}
                   </p>
                 </div>
               ) : (
@@ -424,7 +469,8 @@ export function AssignmentSchedulePanel({
       {/* Footer actions */}
       {(panelState === "loaded" || panelState === "scheduling") &&
         slotsData &&
-        !slotsData.no_slots_found && (
+        (slotsData.availability_reason === "available" ||
+          slotsData.availability_reason === "available_review_window") && (
           <div className="flex items-center gap-2 border-t border-border/60 px-4 py-3">
             <Button
               size="sm"
@@ -453,7 +499,9 @@ export function AssignmentSchedulePanel({
         )}
 
       {panelState === "idle" ||
-      (panelState === "loaded" && slotsData?.no_slots_found) ? (
+      (panelState === "loaded" &&
+        slotsData?.availability_reason !== "available" &&
+        slotsData?.availability_reason !== "available_review_window") ? (
         <div className="border-t border-border/60 px-4 py-3">
           <Button
             size="sm"

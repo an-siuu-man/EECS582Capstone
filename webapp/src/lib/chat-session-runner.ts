@@ -15,12 +15,7 @@ import {
   updateChatMessageContent,
   updateChatSessionStatus,
 } from "@/lib/chat-repository";
-import {
-  listCalendarAssignmentsForUser,
-} from "@/lib/calendar-repository";
-import { detectFreeSlots, recommendStudySessions } from "@/lib/calendar-planner";
-import { ensureGoogleCalendarAccessToken } from "@/lib/google-calendar-session";
-import { GoogleCalendarApiError, listGoogleCalendarEvents } from "@/lib/google-calendar";
+import { getSharedAssignmentCalendarContextForChat } from "@/lib/assignment-calendar-context";
 import { type AssignmentPayload } from "@/lib/chat-types";
 import { type SseMessage, readSseStream } from "@/lib/sse";
 import { retrieveLexicalContext } from "@/lib/rag/lexical-retriever";
@@ -185,86 +180,15 @@ function toPercent(value: unknown, fallback: number) {
   return Math.max(0, Math.min(100, Math.round(parsed)));
 }
 
-const SCHEDULING_KEYWORDS = [
-  "schedule",
-  "study time",
-  "calendar",
-  "free time",
-  "time slot",
-  "find time",
-  "plan my",
-  "add to calendar",
-  "study session",
-  "when should i study",
-];
-
-function hasSchedulingIntent(message: string): boolean {
-  const lower = message.toLowerCase();
-  return SCHEDULING_KEYWORDS.some((kw) => lower.includes(kw));
-}
-
-async function fetchCalendarContextForSession(
-  userId: string,
-  sessionId: string,
-  timezone: string,
-): Promise<{ context: object; assignmentRecordId: string } | null> {
-  const allAssignments = await listCalendarAssignmentsForUser(userId);
-  // Match by the session ID — sessions are ordered by updated_at desc so
-  // the active session will be the latestSessionId for its assignment.
-  const assignment = allAssignments.find((a) => a.latestSessionId === sessionId)
-    ?? allAssignments.find((a) => typeof a.assignmentId === "string" && a.assignmentId.length > 0 && !a.isSubmitted && !!a.dueAtISO);
-  if (!assignment || assignment.isSubmitted || !assignment.dueAtISO) return null;
-
-  const assignmentRecordId = (assignment.assignmentId as string | null | undefined) ?? "";
-
-  const now = new Date();
-  const dueAt = new Date(assignment.dueAtISO);
-  if (Number.isNaN(dueAt.getTime()) || dueAt.getTime() <= now.getTime()) return null;
-
-  const nowISO = now.toISOString();
-  const dueAtISO = dueAt.toISOString();
-
-  const googleBusy = await (async () => {
-    try {
-      const requestUrl = process.env.NEXTAUTH_URL ?? "http://localhost:3000";
-      const accessState = await ensureGoogleCalendarAccessToken({ userId, requestUrl });
-      if (!accessState.connected || !accessState.accessToken) return [];
-      const events = await listGoogleCalendarEvents({
-        accessToken: accessState.accessToken,
-        timeMinIso: nowISO,
-        timeMaxIso: dueAtISO,
-      });
-      return events
-        .filter((e) => e.status !== "cancelled" && e.start.dateTime)
-        .map((e) => ({ startISO: e.start.dateTime!, endISO: e.end.dateTime! }));
-    } catch (err) {
-      if (err instanceof GoogleCalendarApiError) return [];
-      return [];
-    }
-  })();
-
-  const busyIntervals = [...googleBusy];
-
-  const plannerAssignment = {
-    assignmentId: assignmentRecordId,
-    title: assignment.title,
-    dueAtISO,
-    priority: assignment.priority,
-  };
-
-  const freeSlots = detectFreeSlots({ assignment: plannerAssignment, busyIntervals, nowISO });
-  const recommendedSessions = recommendStudySessions({ assignment: plannerAssignment, freeSlots });
-
-  return {
-    assignmentRecordId,
-    context: {
-      assignment_id: assignmentRecordId,
-      timezone,
-      no_slots_found: freeSlots.length === 0,
-      free_slots: freeSlots,
-      recommended_sessions: recommendedSessions,
-    },
-  };
+function toOptionalString(value: unknown) {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return null;
 }
 
 async function openAgentRunStream(agentUrl: string, body: string) {
@@ -515,8 +439,9 @@ async function runFollowupChat(input: {
   assistantMessageId: string;
   userMessageContent: string;
   thinkingMode: FollowupThinkingMode;
+  requestUrl: string;
 }) {
-  const { sessionId, assistantMessageId, userMessageContent, thinkingMode } = input;
+  const { sessionId, assistantMessageId, userMessageContent, thinkingMode, requestUrl } = input;
 
   let flushTimer: ReturnType<typeof setInterval> | null = null;
   let bufferedDelta = "";
@@ -600,20 +525,35 @@ async function runFollowupChat(input: {
       .filter((message) => message.content.trim().length > 0)
       .slice(-FOLLOWUP_CHAT_HISTORY_LIMIT);
     const assignmentPayload = sanitizeAssignmentPayloadForFollowup(sessionContext.payload);
+    const fallbackTimezone = String(sessionContext.payload.userTimezone ?? "UTC");
 
-    // Fetch calendar context if the message has scheduling intent
     let calendarContext: object | null = null;
     let resolvedAssignmentRecordId: string | null = null;
-    if (hasSchedulingIntent(userMessageContent)) {
-      const calendarResult = await fetchCalendarContextForSession(
-        sessionContext.userId,
-        sessionId,
-        String(sessionContext.payload.userTimezone ?? "UTC"),
-      ).catch(() => null);
-      if (calendarResult) {
-        calendarContext = calendarResult.context;
-        resolvedAssignmentRecordId = calendarResult.assignmentRecordId;
-      }
+    const resolvedContext = await getSharedAssignmentCalendarContextForChat({
+      userId: sessionContext.userId,
+      assignmentRecordId: sessionContext.assignmentRecordId ?? null,
+      courseId: toOptionalString(sessionContext.payload.courseId),
+      providerAssignmentId: toOptionalString(sessionContext.payload.assignmentId),
+      assignmentUrl: toOptionalString(sessionContext.payload.url),
+      requestUrl,
+      timezone: fallbackTimezone,
+    }).catch(() => ({
+      assignment_id: sessionContext.assignmentRecordId ?? null,
+      timezone: fallbackTimezone,
+      availability_reason: "calendar_fetch_failed" as const,
+      integration: {
+        google: {
+          status: "disconnected" as const,
+          connected: false,
+        },
+      },
+      no_slots_found: false,
+      free_slots: [],
+      recommended_sessions: [],
+    }));
+    if (resolvedContext) {
+      calendarContext = resolvedContext;
+      resolvedAssignmentRecordId = resolvedContext.assignment_id ?? null;
     }
 
     const streamResponse = await openAgentChatStream(
@@ -798,6 +738,7 @@ export function startFollowupChatRun(input: {
   assistantMessageId: string;
   userMessageContent: string;
   thinkingMode?: FollowupThinkingMode;
+  requestUrl: string;
 }) {
   void runFollowupChat({
     ...input,

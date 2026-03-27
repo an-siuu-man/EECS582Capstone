@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { applyAuthCookies, resolveRequestUser } from "@/lib/auth/session";
+import { invalidateAssignmentCalendarContextCache } from "@/lib/assignment-calendar-context";
 import {
   createGoogleCalendarEvent,
   getGoogleOAuthConfig,
@@ -161,6 +162,7 @@ export async function POST(req: Request) {
           userId,
           lastError: "Missing refresh token.",
         }).catch(() => undefined);
+        invalidateAssignmentCalendarContextCache({ userId, assignmentId });
         return NextResponse.json(
           { error: "Google Calendar authorization expired. Reconnect required." },
           { status: 409 },
@@ -182,6 +184,7 @@ export async function POST(req: Request) {
         tokenExpiresAt: toExpiryIso(refreshed.expiresIn),
         googleEmail: integration.googleEmail,
       });
+      invalidateAssignmentCalendarContextCache({ userId, assignmentId });
     }
 
     if (!accessToken) {
@@ -209,6 +212,10 @@ export async function POST(req: Request) {
         endIso: window.end.toISOString(),
         timezone: timezoneOverride ?? metadata.timezone ?? undefined,
       },
+    });
+    invalidateAssignmentCalendarContextCache({
+      userId,
+      assignmentId: metadata.assignmentId,
     });
 
     const response = NextResponse.json({
@@ -238,6 +245,7 @@ export async function POST(req: Request) {
         userId,
         lastError: "Google authorization rejected by provider.",
       }).catch(() => undefined);
+      invalidateAssignmentCalendarContextCache({ userId, assignmentId });
       return NextResponse.json(
         { error: "Google Calendar authorization expired. Reconnect required." },
         { status: 409 },
@@ -251,4 +259,3 @@ export async function POST(req: Request) {
     );
   }
 }
-

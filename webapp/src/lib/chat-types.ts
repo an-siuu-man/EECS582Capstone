@@ -73,6 +73,7 @@ export type PersistedSessionSnapshot = {
   sessionId: string;
   userId: string;
   assignmentUuid: string;
+  assignmentRecordId?: string | null;
   createdAt: number;
   updatedAt: number;
   status: ChatSessionStatus;

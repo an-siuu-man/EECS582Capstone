@@ -19,9 +19,9 @@ Errors/Exceptions:
 - Pydantic validation errors for malformed request bodies.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .shared import PdfFile
 
@@ -45,11 +45,56 @@ class RetrievalChunk(BaseModel):
     score: float = 0.0
 
 
+class CalendarIntegrationState(BaseModel):
+    status: Literal["connected", "disconnected", "needs_attention"]
+    connected: bool
+
+
+class CalendarIntegrationContext(BaseModel):
+    google: CalendarIntegrationState
+
+
+class CalendarFreeSlot(BaseModel):
+    start_iso: str
+    end_iso: str
+    duration_minutes: int
+    score: float
+    reason: str = ""
+
+
+class CalendarRecommendedSession(BaseModel):
+    start_iso: str
+    end_iso: str
+    focus: str = ""
+    priority: Literal["high", "medium", "low"]
+
+
+class CalendarContext(BaseModel):
+    assignment_id: Optional[str] = None
+    timezone: str = "UTC"
+    availability_reason: Literal[
+        "available",
+        "available_review_window",
+        "no_slots_before_deadline",
+        "no_slots_in_review_window",
+        "calendar_disconnected",
+        "calendar_needs_attention",
+        "calendar_fetch_failed",
+        "assignment_missing_due_date",
+        "assignment_past_due",
+        "assignment_unresolved",
+    ] = "available"
+    integration: CalendarIntegrationContext
+    no_slots_found: bool = False
+    free_slots: List[CalendarFreeSlot] = Field(default_factory=list)
+    recommended_sessions: List[CalendarRecommendedSession] = Field(default_factory=list)
+
+
 class ChatStreamRequest(BaseModel):
     assignment_payload: Dict[str, Any]
     guide_markdown: str = ""
-    chat_history: List[ChatHistoryMessage] = []
-    retrieval_context: List[RetrievalChunk] = []
+    chat_history: List[ChatHistoryMessage] = Field(default_factory=list)
+    retrieval_context: List[RetrievalChunk] = Field(default_factory=list)
     user_message: str
     thinking_mode: bool = False
-    calendar_context: Optional[Dict[str, Any]] = None
+    calendar_context: Optional[CalendarContext] = None
