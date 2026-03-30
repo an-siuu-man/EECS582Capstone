@@ -172,7 +172,7 @@ export function GuideExportButton({
             className="fixed inset-0 z-10"
             onClick={() => setOpen(false)}
           />
-          <div className="absolute right-0 z-20 mt-1 min-w-[180px] rounded-md border border-border bg-background shadow-md">
+          <div className="absolute bottom-full right-0 z-20 mb-1 min-w-[180px] rounded-md border border-border bg-background shadow-md">
             {/* Current / latest version */}
             <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
               {latestLabel}
