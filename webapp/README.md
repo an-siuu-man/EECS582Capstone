@@ -50,6 +50,10 @@ Implemented in `src/lib/calendar-planner.ts`.
 - `POST /api/chat-session`
 - `GET /api/chat-session/:sessionId`
 - `GET /api/chat-session/:sessionId/events` (SSE)
+- `GET /api/chat-session/:sessionId/guide-versions`
+- `GET /api/chat-session/:sessionId/guide-versions/:versionNumber`
+- `GET /api/chat-session/:sessionId/guide-versions/compare?from_version=<n>&to_version=<n>`
+- `GET /api/chat-session/:sessionId/rubric-coverage?version=<n>`
 - `POST /api/run-agent` (legacy proxy)
 
 ### Google Calendar Integration

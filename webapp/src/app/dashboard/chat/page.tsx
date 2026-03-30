@@ -118,6 +118,37 @@ type GuideVersionMeta = {
   created_at: string
 }
 
+type GuideVersionDiffLine = {
+  type: "context" | "added" | "removed"
+  text: string
+}
+
+type GuideVersionCompareResponse = {
+  ok: boolean
+  from_version: number
+  to_version: number
+  summary: {
+    added_lines: number
+    removed_lines: number
+    changed_sections: number
+  }
+  diff: GuideVersionDiffLine[]
+}
+
+type RubricCoverageCriterion = {
+  index: number
+  criterion_text: string
+  status: "covered" | "partial" | "missing"
+  matched_snippets: string[]
+}
+
+type RubricCoverageResponse = {
+  ok: boolean
+  version_number: number
+  rubric_available: boolean
+  criteria: RubricCoverageCriterion[]
+}
+
 const EASE_OUT = [0.22, 1, 0.36, 1] as const
 const THINK_OPEN_TAG = "<think>"
 const THINK_CLOSE_TAG = "</think>"
@@ -266,6 +297,17 @@ function stageLabel(stage: ChatSessionStage) {
   }
 }
 
+function rubricStatusClass(status: RubricCoverageCriterion["status"]) {
+  switch (status) {
+    case "covered":
+      return "border-emerald-300/70 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+    case "partial":
+      return "border-amber-300/70 bg-amber-500/15 text-amber-700 dark:text-amber-300"
+    default:
+      return "border-zinc-300/70 bg-zinc-500/15 text-zinc-700 dark:text-zinc-300"
+  }
+}
+
 function formatDateTime(value: number | string | null | undefined) {
   if (value == null) return null
   const date = new Date(value)
@@ -315,6 +357,17 @@ function DashboardChatPageContent() {
   const [fileError, setFileError] = useState<string | null>(null)
   const [guideVersions, setGuideVersions] = useState<GuideVersionMeta[]>([])
   const [isRegenerating, setIsRegenerating] = useState(false)
+  const [isCompareDialogOpen, setIsCompareDialogOpen] = useState(false)
+  const [compareFromVersion, setCompareFromVersion] = useState<number | null>(null)
+  const [compareToVersion, setCompareToVersion] = useState<number | null>(null)
+  const [isCompareLoading, setIsCompareLoading] = useState(false)
+  const [compareError, setCompareError] = useState<string | null>(null)
+  const [compareResult, setCompareResult] = useState<GuideVersionCompareResponse | null>(null)
+  const [isRubricDialogOpen, setIsRubricDialogOpen] = useState(false)
+  const [rubricVersion, setRubricVersion] = useState<number | null>(null)
+  const [isRubricLoading, setIsRubricLoading] = useState(false)
+  const [rubricError, setRubricError] = useState<string | null>(null)
+  const [rubricResult, setRubricResult] = useState<RubricCoverageResponse | null>(null)
   const threadContainerRef = useRef<HTMLDivElement | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -687,6 +740,30 @@ function DashboardChatPageContent() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, session?.status])
 
+  useEffect(() => {
+    const availableVersions = new Set(guideVersions.map((entry) => entry.version_number))
+    const latest = guideVersions.length > 0 ? guideVersions[guideVersions.length - 1].version_number : null
+    const previous = guideVersions.length > 1 ? guideVersions[guideVersions.length - 2].version_number : null
+
+    setRubricVersion((current) => {
+      if (latest == null) return null
+      if (current != null && availableVersions.has(current)) return current
+      return latest
+    })
+
+    setCompareFromVersion((current) => {
+      if (previous == null) return null
+      if (current != null && availableVersions.has(current)) return current
+      return previous
+    })
+
+    setCompareToVersion((current) => {
+      if (latest == null || previous == null) return null
+      if (current != null && availableVersions.has(current)) return current
+      return latest
+    })
+  }, [guideVersions])
+
   // Restore calendar proposals from persisted message metadata on page load / session change
   useEffect(() => {
     if (!session || session.session_id !== sessionId) return
@@ -843,6 +920,8 @@ function DashboardChatPageContent() {
         effectiveSession.stage === "chat_streaming") &&
       !isSending,
   )
+  const hasVersionCompare = guideVersions.length > 1
+  const hasGuideVersions = guideVersions.length > 0
   const latestAssistantMessageId = latestAssistantMessageIdRef.current
 
   const pendingDeleteSession = pendingDeleteSessionId
@@ -1153,6 +1232,91 @@ function DashboardChatPageContent() {
     } catch {
       setErrorText("Failed to start guide regeneration.")
       setIsRegenerating(false)
+    }
+  }
+
+  async function readRouteError(response: Response, fallback: string) {
+    const body = await response.json().catch(() => ({})) as { error?: string }
+    if (typeof body.error === "string" && body.error.trim().length > 0) {
+      return body.error
+    }
+    return fallback
+  }
+
+  async function handleRunVersionCompare() {
+    if (!sessionId || compareFromVersion == null || compareToVersion == null) return
+    if (compareFromVersion === compareToVersion) {
+      setCompareError("Please select two different versions.")
+      return
+    }
+
+    setIsCompareLoading(true)
+    setCompareError(null)
+
+    try {
+      const params = new URLSearchParams({
+        from_version: String(compareFromVersion),
+        to_version: String(compareToVersion),
+      })
+      const response = await fetch(
+        `/api/chat-session/${encodeURIComponent(sessionId)}/guide-versions/compare?${params.toString()}`,
+        { cache: "no-store" },
+      )
+      if (!response.ok) {
+        setCompareResult(null)
+        setCompareError(await readRouteError(response, `Compare failed (${response.status})`))
+        return
+      }
+
+      const body = await response.json() as GuideVersionCompareResponse
+      if (!body?.ok || !Array.isArray(body.diff)) {
+        setCompareResult(null)
+        setCompareError("Unexpected compare response.")
+        return
+      }
+
+      setCompareResult(body)
+    } catch {
+      setCompareResult(null)
+      setCompareError("Failed to compare guide versions.")
+    } finally {
+      setIsCompareLoading(false)
+    }
+  }
+
+  async function handleRunRubricCoverage() {
+    if (!sessionId || rubricVersion == null) return
+
+    setIsRubricLoading(true)
+    setRubricError(null)
+
+    try {
+      const params = new URLSearchParams({
+        version: String(rubricVersion),
+      })
+      const response = await fetch(
+        `/api/chat-session/${encodeURIComponent(sessionId)}/rubric-coverage?${params.toString()}`,
+        { cache: "no-store" },
+      )
+      if (!response.ok) {
+        setRubricResult(null)
+        setRubricError(await readRouteError(response, `Coverage check failed (${response.status})`))
+        return
+      }
+
+      const body = await response.json() as RubricCoverageResponse
+      if (!body?.ok || !Array.isArray(body.criteria)) {
+        setRubricResult(null)
+        setRubricError("Unexpected rubric coverage response.")
+        return
+      }
+
+      setRubricResult(body)
+    } catch {
+      setRubricResult(null)
+      setRubricError("Failed to analyze rubric coverage.")
+    } finally {
+      setIsRubricLoading(false)
     }
   }
 
@@ -1643,9 +1807,279 @@ function DashboardChatPageContent() {
                 )}
               </div>
             ))}
+            <div className="mt-4 flex w-full flex-col gap-2 px-1">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!hasVersionCompare}
+                className="h-7 w-full px-2 text-[11px]"
+                onClick={() => {
+                  if (!hasVersionCompare) return
+                  setCompareError(null)
+                  setCompareResult(null)
+                  setIsCompareDialogOpen(true)
+                }}
+                title={hasVersionCompare ? "Compare two guide versions" : "Need at least 2 guide versions"}
+              >
+                Compare
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!hasGuideVersions}
+                className="h-7 w-full px-2 text-[11px]"
+                onClick={() => {
+                  if (!hasGuideVersions) return
+                  setRubricError(null)
+                  setRubricResult(null)
+                  setIsRubricDialogOpen(true)
+                }}
+                title="Analyze rubric coverage for a guide version"
+              >
+                Rubric
+              </Button>
+            </div>
           </div>
         )}
       </motion.div>
+
+      <Dialog
+        open={isCompareDialogOpen}
+        onOpenChange={(open) => {
+          setIsCompareDialogOpen(open)
+          if (!open) {
+            setCompareError(null)
+            setCompareResult(null)
+          }
+        }}
+      >
+        <DialogContent className="max-h-[85vh] w-[95vw] max-w-4xl overflow-hidden p-0">
+          <DialogHeader className="border-b border-border/70 px-5 py-4">
+            <DialogTitle>Guide Version Compare</DialogTitle>
+            <DialogDescription>
+              Compare two guide versions with added, removed, and unchanged lines.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="border-b border-border/60 px-5 py-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+              <label className="flex min-w-0 flex-1 flex-col gap-1 text-xs font-medium text-muted-foreground">
+                From Version
+                <select
+                  className="h-9 rounded-md border border-border bg-background px-2 text-sm text-foreground"
+                  value={compareFromVersion != null ? String(compareFromVersion) : ""}
+                  onChange={(event) => {
+                    setCompareFromVersion(Number.parseInt(event.target.value, 10))
+                  }}
+                >
+                  {guideVersions.map((version) => (
+                    <option key={`from-${version.version_number}`} value={version.version_number}>
+                      v{version.version_number}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex min-w-0 flex-1 flex-col gap-1 text-xs font-medium text-muted-foreground">
+                To Version
+                <select
+                  className="h-9 rounded-md border border-border bg-background px-2 text-sm text-foreground"
+                  value={compareToVersion != null ? String(compareToVersion) : ""}
+                  onChange={(event) => {
+                    setCompareToVersion(Number.parseInt(event.target.value, 10))
+                  }}
+                >
+                  {guideVersions.map((version) => (
+                    <option key={`to-${version.version_number}`} value={version.version_number}>
+                      v{version.version_number}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <Button
+                type="button"
+                onClick={() => void handleRunVersionCompare()}
+                disabled={
+                  isCompareLoading ||
+                  compareFromVersion == null ||
+                  compareToVersion == null ||
+                  compareFromVersion === compareToVersion
+                }
+                className="h-9 shrink-0"
+              >
+                {isCompareLoading ? (
+                  <>
+                    <LoaderCircle className="mr-1.5 h-4 w-4 animate-spin" />
+                    Comparing...
+                  </>
+                ) : (
+                  "Run Compare"
+                )}
+              </Button>
+            </div>
+          </div>
+
+          <div className="max-h-[calc(85vh-182px)] overflow-y-auto px-5 py-4">
+            {compareError ? (
+              <p className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {compareError}
+              </p>
+            ) : null}
+
+            {!compareResult && !compareError ? (
+              <p className="text-sm text-muted-foreground">Choose versions and run compare to see differences.</p>
+            ) : null}
+
+            {compareResult ? (
+              <div className="space-y-3">
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant="outline" className="border-emerald-300/70 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
+                    + {compareResult.summary.added_lines} lines
+                  </Badge>
+                  <Badge variant="outline" className="border-rose-300/70 bg-rose-500/15 text-rose-700 dark:text-rose-300">
+                    - {compareResult.summary.removed_lines} lines
+                  </Badge>
+                  <Badge variant="outline">
+                    {compareResult.summary.changed_sections} sections changed
+                  </Badge>
+                </div>
+
+                <div className="overflow-hidden rounded-md border border-border/70">
+                  <div className="max-h-[52vh] overflow-y-auto">
+                    {compareResult.diff.length > 0 ? (
+                      compareResult.diff.map((line, index) => {
+                        const marker = line.type === "added" ? "+" : line.type === "removed" ? "-" : " "
+                        const rowTone =
+                          line.type === "added"
+                            ? "bg-emerald-500/10 text-emerald-900 dark:text-emerald-200"
+                            : line.type === "removed"
+                            ? "bg-rose-500/10 text-rose-900 dark:text-rose-200"
+                            : "bg-background text-muted-foreground"
+                        return (
+                          <div
+                            key={`${line.type}-${index}-${line.text.slice(0, 24)}`}
+                            className={`grid grid-cols-[1.5rem_minmax(0,1fr)] gap-1 border-b border-border/50 px-2 py-1.5 text-[12px] leading-5 ${rowTone}`}
+                          >
+                            <span className="select-none text-center [font-family:var(--font-space-mono)]">{marker}</span>
+                            <pre className="m-0 whitespace-pre-wrap break-words [font-family:var(--font-space-mono)]">
+                              {line.text || " "}
+                            </pre>
+                          </div>
+                        )
+                      })
+                    ) : (
+                      <p className="px-3 py-3 text-sm text-muted-foreground">No line differences found.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isRubricDialogOpen}
+        onOpenChange={(open) => {
+          setIsRubricDialogOpen(open)
+          if (!open) {
+            setRubricError(null)
+            setRubricResult(null)
+          }
+        }}
+      >
+        <DialogContent className="max-h-[85vh] w-[95vw] max-w-3xl overflow-hidden p-0">
+          <DialogHeader className="border-b border-border/70 px-5 py-4">
+            <DialogTitle>Rubric Coverage</DialogTitle>
+            <DialogDescription>
+              Check which rubric criteria are covered by a selected guide version.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="border-b border-border/60 px-5 py-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+              <label className="flex min-w-0 flex-1 flex-col gap-1 text-xs font-medium text-muted-foreground">
+                Guide Version
+                <select
+                  className="h-9 rounded-md border border-border bg-background px-2 text-sm text-foreground"
+                  value={rubricVersion != null ? String(rubricVersion) : ""}
+                  onChange={(event) => {
+                    setRubricVersion(Number.parseInt(event.target.value, 10))
+                  }}
+                >
+                  {guideVersions.map((version) => (
+                    <option key={`rubric-${version.version_number}`} value={version.version_number}>
+                      v{version.version_number}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <Button
+                type="button"
+                onClick={() => void handleRunRubricCoverage()}
+                disabled={isRubricLoading || rubricVersion == null}
+                className="h-9 shrink-0"
+              >
+                {isRubricLoading ? (
+                  <>
+                    <LoaderCircle className="mr-1.5 h-4 w-4 animate-spin" />
+                    Analyzing...
+                  </>
+                ) : (
+                  "Analyze Coverage"
+                )}
+              </Button>
+            </div>
+          </div>
+
+          <div className="max-h-[calc(85vh-182px)] overflow-y-auto px-5 py-4">
+            {rubricError ? (
+              <p className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {rubricError}
+              </p>
+            ) : null}
+
+            {!rubricResult && !rubricError ? (
+              <p className="text-sm text-muted-foreground">Select a version and run analysis.</p>
+            ) : null}
+
+            {rubricResult && !rubricResult.rubric_available ? (
+              <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-3 text-sm text-muted-foreground">
+                No rubric criteria are available for this assignment. Guide version diff still works normally.
+              </div>
+            ) : null}
+
+            {rubricResult && rubricResult.rubric_available ? (
+              <div className="space-y-2">
+                {rubricResult.criteria.map((criterion) => (
+                  <div key={`criterion-${criterion.index}`} className="rounded-md border border-border/70 bg-background px-3 py-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-sm font-medium leading-5">
+                        {criterion.index + 1}. {criterion.criterion_text}
+                      </p>
+                      <Badge variant="outline" className={rubricStatusClass(criterion.status)}>
+                        {criterion.status}
+                      </Badge>
+                    </div>
+                    {criterion.matched_snippets.length > 0 ? (
+                      <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+                        {criterion.matched_snippets.map((snippet, snippetIndex) => (
+                          <li key={`snippet-${criterion.index}-${snippetIndex}`} className="break-words">
+                            {snippet}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="mt-2 text-xs text-muted-foreground">No matching snippets found for this criterion.</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={isContextDialogOpen} onOpenChange={setIsContextDialogOpen}>
           <DialogContent className="max-h-[85vh] w-full max-w-2xl overflow-hidden p-0">

@@ -162,6 +162,10 @@ Calendar planning flow (new):
 - `POST /api/chat-session`
 - `GET /api/chat-session/:sessionId`
 - `GET /api/chat-session/:sessionId/events` (SSE)
+- `GET /api/chat-session/:sessionId/guide-versions`
+- `GET /api/chat-session/:sessionId/guide-versions/:versionNumber`
+- `GET /api/chat-session/:sessionId/guide-versions/compare?from_version=<n>&to_version=<n>`
+- `GET /api/chat-session/:sessionId/rubric-coverage?version=<n>`
 - `POST /api/run-agent` (legacy proxy path)
 - `GET /api/integrations/google-calendar`
 - `GET /api/integrations/google-calendar/connect`
@@ -282,5 +286,4 @@ python -m pytest
 - Add authentication/authorization and production-grade security constraints.
 - Stabilize and version contracts across all components.
 - Expand automated contract/integration/e2e coverage across extension, web app, and agent service.
-
 
