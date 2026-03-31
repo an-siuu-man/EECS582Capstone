@@ -435,9 +435,17 @@ function AssignmentList({
                       </TooltipTrigger>
                       <TooltipContent>{fullCourseName}</TooltipContent>
                     </Tooltip>
-                    <CardTitle className="line-clamp-2 break-words text-base leading-snug" title={assignment.title}>
-                      {assignment.title}
-                    </CardTitle>
+                    {assignment.assignment_id ? (
+                      <Link href={`/dashboard/assignments/${encodeURIComponent(assignment.assignment_id)}`}>
+                        <CardTitle className="line-clamp-2 break-words text-base leading-snug hover:text-primary hover:underline" title={assignment.title}>
+                          {assignment.title}
+                        </CardTitle>
+                      </Link>
+                    ) : (
+                      <CardTitle className="line-clamp-2 break-words text-base leading-snug" title={assignment.title}>
+                        {assignment.title}
+                      </CardTitle>
+                    )}
                     <CardDescription className="text-xs">
                       Attachments: {assignment.attachment_count}
                     </CardDescription>
