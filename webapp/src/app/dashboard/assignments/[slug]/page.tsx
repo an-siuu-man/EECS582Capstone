@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 import { useCallback, useEffect, useState } from "react"
-import { motion } from "framer-motion"
+import { AnimatePresence, motion } from "framer-motion"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import remarkMath from "remark-math"
@@ -636,7 +636,12 @@ export default function AssignmentDetailPage() {
               </CardHeader>
               <CardContent>
                 {detail.guide_versions.length > 1 && selectedGuideVersionNumber !== null && (
-                  <div className="mb-3 overflow-x-auto pb-1">
+                  <motion.div
+                    className="mb-3 overflow-x-auto pb-1"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ duration: 0.24, ease: EASE_OUT }}
+                  >
                     <Tabs
                       value={String(selectedGuideVersionNumber)}
                       onValueChange={(value) => {
@@ -644,61 +649,107 @@ export default function AssignmentDetailPage() {
                       }}
                       className="min-w-max gap-1"
                     >
-                      <TabsList variant="line" className="h-auto w-max justify-start">
+                      <TabsList
+                        variant="default"
+                        className={cn(
+                          "h-auto w-max justify-start rounded-full border border-border/70 bg-muted/65 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] backdrop-blur-sm",
+                        )}
+                      >
                         {detail.guide_versions.map((version) => (
                           <TabsTrigger
                             key={version.version_number}
                             value={String(version.version_number)}
-                            className="h-8 flex-none px-2 text-xs"
+                            className={cn(
+                              "relative h-8 flex-none overflow-hidden rounded-full px-3 text-xs font-medium",
+                              "text-muted-foreground transition-[color,box-shadow,background-color] duration-300 ease-out",
+                              "hover:text-foreground/90",
+                              "focus-visible:ring-2 focus-visible:ring-brand-blue/35 focus-visible:ring-offset-0 focus-visible:outline-none",
+                              "data-[state=active]:text-brand-blue data-[state=active]:shadow-[0_0_0_1px_rgba(0,81,186,0.16),0_8px_18px_rgba(15,23,42,0.12)]",
+                            )}
                           >
-                            v{version.version_number}
+                            {selectedGuideVersionNumber === version.version_number && (
+                              <motion.span
+                                layoutId="guide-version-active-pill"
+                                className="absolute inset-0 rounded-full bg-background ring-1 ring-brand-blue/20"
+                                transition={{
+                                  type: "spring",
+                                  stiffness: 520,
+                                  damping: 36,
+                                  mass: 0.65,
+                                }}
+                              />
+                            )}
+                            <span className="relative z-10">v{version.version_number}</span>
                           </TabsTrigger>
                         ))}
                       </TabsList>
                     </Tabs>
-                  </div>
+                  </motion.div>
                 )}
 
                 {guideVersionError && (
                   <p className="mb-3 text-xs text-destructive">{guideVersionError}</p>
                 )}
 
-                {loadingGuideVersionNumber === selectedGuideVersionNumber && !hasVisibleGuideContent ? (
-                  <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
-                    <LoaderCircle className="h-4 w-4 animate-spin" />
-                    Loading guide version…
-                  </div>
-                ) : hasVisibleGuideContent ? (
-                  <div className={cn("min-w-0 text-[15px] leading-6", GUIDE_MARKDOWN_CLASS)}>
-                    <ReactMarkdown
-                      remarkPlugins={GUIDE_REMARK_PLUGINS}
-                      rehypePlugins={GUIDE_REHYPE_PLUGINS}
-                      components={MARKDOWN_COMPONENTS}
+                <AnimatePresence mode="wait" initial={false}>
+                  {loadingGuideVersionNumber === selectedGuideVersionNumber && !hasVisibleGuideContent ? (
+                    <motion.div
+                      key={`loading-${selectedGuideVersionNumber ?? "none"}`}
+                      initial={{ opacity: 0, y: 8, filter: "blur(4px)" }}
+                      animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+                      exit={{ opacity: 0, y: -8, filter: "blur(4px)" }}
+                      transition={{ duration: 0.24, ease: EASE_OUT }}
+                      className="flex items-center gap-2 py-8 text-sm text-muted-foreground"
                     >
-                      {guideMarkdown}
-                    </ReactMarkdown>
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center justify-center gap-3 py-10 text-center text-muted-foreground">
-                    <BookOpen className="h-10 w-10 opacity-30" />
-                    <p className="text-sm">No study guide generated yet.</p>
-                    {detail.sessions.length > 0 ? (
-                      <Button variant="outline" size="sm" asChild>
-                        <Link href={`/dashboard/chat?session=${detail.sessions[0]?.session_id}`}>
-                          <MessageSquare className="h-3.5 w-3.5 mr-1.5" />
-                          Open Chat to Generate
-                        </Link>
-                      </Button>
-                    ) : (
-                      <Button variant="outline" size="sm" asChild>
-                        <Link href="/dashboard/chat">
-                          <Plus className="h-3.5 w-3.5 mr-1.5" />
-                          Start a Chat
-                        </Link>
-                      </Button>
-                    )}
-                  </div>
-                )}
+                      <LoaderCircle className="h-4 w-4 animate-spin" />
+                      Loading guide version…
+                    </motion.div>
+                  ) : hasVisibleGuideContent ? (
+                    <motion.div
+                      key={`guide-${selectedGuideVersionNumber ?? "latest"}`}
+                      initial={{ opacity: 0, y: 14, scale: 0.99, filter: "blur(6px)" }}
+                      animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
+                      exit={{ opacity: 0, y: -10, scale: 0.995, filter: "blur(4px)" }}
+                      transition={{ duration: 0.3, ease: EASE_OUT }}
+                      className={cn("min-w-0 text-[15px] leading-6", GUIDE_MARKDOWN_CLASS)}
+                    >
+                      <ReactMarkdown
+                        remarkPlugins={GUIDE_REMARK_PLUGINS}
+                        rehypePlugins={GUIDE_REHYPE_PLUGINS}
+                        components={MARKDOWN_COMPONENTS}
+                      >
+                        {guideMarkdown}
+                      </ReactMarkdown>
+                    </motion.div>
+                  ) : (
+                    <motion.div
+                      key="empty-guide"
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -8 }}
+                      transition={{ duration: 0.24, ease: EASE_OUT }}
+                      className="flex flex-col items-center justify-center gap-3 py-10 text-center text-muted-foreground"
+                    >
+                      <BookOpen className="h-10 w-10 opacity-30" />
+                      <p className="text-sm">No study guide generated yet.</p>
+                      {detail.sessions.length > 0 ? (
+                        <Button variant="outline" size="sm" asChild>
+                          <Link href={`/dashboard/chat?session=${detail.sessions[0]?.session_id}`}>
+                            <MessageSquare className="h-3.5 w-3.5 mr-1.5" />
+                            Open Chat to Generate
+                          </Link>
+                        </Button>
+                      ) : (
+                        <Button variant="outline" size="sm" asChild>
+                          <Link href="/dashboard/chat">
+                            <Plus className="h-3.5 w-3.5 mr-1.5" />
+                            Start a Chat
+                          </Link>
+                        </Button>
+                      )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </CardContent>
             </Card>
 
