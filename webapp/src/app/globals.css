@@ -63,9 +63,9 @@
 :root {
   --radius: 0.625rem;
   --font-sans-stack: "SF Pro Text", "SF Pro Display", ".SFNSText", ".SFNSDisplay",
-    ".AppleSystemUIFont", var(--font-body), "Helvetica Neue", Helvetica, Arial;
-  --font-mono-stack: "SF Mono", "SFMono-Regular", Menlo, Monaco, var(--font-code),
-    "IBM Plex Mono", "Liberation Mono", "Courier New";
+    ".AppleSystemUIFont", "Nunito Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-mono-stack: "SF Mono", "SFMono-Regular", Menlo, Monaco, Consolas,
+    "IBM Plex Mono", "Liberation Mono", "Courier New", monospace;
   
   /* Brand Colors */
   --brand-blue: #0051BA;

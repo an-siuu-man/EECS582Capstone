@@ -88,6 +88,14 @@ type RubricCriterion = {
   ratings?: Array<{ description?: string; points?: number }>
 }
 
+type GuideSessionItem = {
+  session_id: string
+  title: string
+  version_count: number
+  latest_guide_at: string
+  created_at: number
+}
+
 type AssignmentDetail = {
   assignment_id: string
   title: string
@@ -106,6 +114,8 @@ type AssignmentDetail = {
   priority: "High" | "Medium" | "Low"
   sessions: SessionItem[]
   latest_session_id: string | null
+  latest_guide_session_id: string | null
+  guide_sessions: GuideSessionItem[]
   latest_guide_content: string | null
   guide_versions: GuideVersionMeta[]
   has_guide: boolean
@@ -173,6 +183,8 @@ export default function AssignmentDetailPage() {
   const [guideContentByVersion, setGuideContentByVersion] = useState<Record<number, string>>({})
   const [loadingGuideVersionNumber, setLoadingGuideVersionNumber] = useState<number | null>(null)
   const [guideVersionError, setGuideVersionError] = useState<string | null>(null)
+  const [selectedGuideSessionId, setSelectedGuideSessionId] = useState<string | null>(null)
+  const [currentGuideVersions, setCurrentGuideVersions] = useState<GuideVersionMeta[]>([])
   const [isCreatingChat, setIsCreatingChat] = useState(false)
 
   async function handleNewChat() {
@@ -210,6 +222,8 @@ export default function AssignmentDetailPage() {
       setSelectedGuideVersion(latestVersionNumber)
       setLoadingGuideVersionNumber(null)
       setGuideVersionError(null)
+      setSelectedGuideSessionId(body.latest_guide_session_id)
+      setCurrentGuideVersions(body.guide_versions)
       if (latestVersionNumber !== null && body.latest_guide_content !== null) {
         setGuideContentByVersion({
           [latestVersionNumber]: body.latest_guide_content,
@@ -232,13 +246,13 @@ export default function AssignmentDetailPage() {
       setSelectedGuideVersion(versionNumber)
       setGuideVersionError(null)
 
-      if (!detail?.latest_session_id) return
+      if (!selectedGuideSessionId) return
       if (Object.prototype.hasOwnProperty.call(guideContentByVersion, versionNumber)) return
 
       setLoadingGuideVersionNumber(versionNumber)
       try {
         const response = await fetch(
-          `/api/chat-session/${encodeURIComponent(detail.latest_session_id)}/guide-versions/${versionNumber}`,
+          `/api/chat-session/${encodeURIComponent(selectedGuideSessionId)}/guide-versions/${versionNumber}`,
           { cache: "no-store" },
         )
         if (!response.ok) {
@@ -261,7 +275,49 @@ export default function AssignmentDetailPage() {
         setLoadingGuideVersionNumber((current) => (current === versionNumber ? null : current))
       }
     },
-    [detail?.latest_session_id, guideContentByVersion],
+    [selectedGuideSessionId, guideContentByVersion],
+  )
+
+  const handleGuideSessionChange = useCallback(
+    async (nextSessionId: string) => {
+      if (!nextSessionId || nextSessionId === selectedGuideSessionId) return
+      setSelectedGuideSessionId(nextSessionId)
+      setSelectedGuideVersion(null)
+      setGuideContentByVersion({})
+      setGuideVersionError(null)
+      setLoadingGuideVersionNumber(null)
+
+      try {
+        const versionsRes = await fetch(
+          `/api/chat-session/${encodeURIComponent(nextSessionId)}/guide-versions`,
+          { cache: "no-store" },
+        )
+        if (!versionsRes.ok) throw new Error("Failed to load guide versions")
+        const versionsBody = (await versionsRes.json()) as { versions?: GuideVersionMeta[] }
+        const versions = versionsBody.versions ?? []
+        setCurrentGuideVersions(versions)
+
+        const latest = versions[versions.length - 1]
+        if (!latest) return
+        setSelectedGuideVersion(latest.version_number)
+        setLoadingGuideVersionNumber(latest.version_number)
+
+        const contentRes = await fetch(
+          `/api/chat-session/${encodeURIComponent(nextSessionId)}/guide-versions/${latest.version_number}`,
+          { cache: "no-store" },
+        )
+        if (!contentRes.ok) throw new Error("Failed to load guide content")
+        const contentBody = (await contentRes.json()) as { content_text?: string }
+        if (typeof contentBody.content_text === "string") {
+          setGuideContentByVersion({ [latest.version_number]: contentBody.content_text })
+        }
+      } catch (err) {
+        setGuideVersionError(err instanceof Error ? err.message : "Failed to load guide.")
+      } finally {
+        setLoadingGuideVersionNumber(null)
+      }
+    },
+    [selectedGuideSessionId],
   )
 
   useEffect(() => {
@@ -350,7 +406,7 @@ export default function AssignmentDetailPage() {
   const fullCourseName = detail.course_name?.trim() || "Unknown course"
   const courseName = truncateWithEllipsis(fullCourseName, MAX_COURSE_NAME_LENGTH)
   const latestGuideVersionNumber =
-    detail.guide_versions[detail.guide_versions.length - 1]?.version_number ?? null
+    currentGuideVersions[currentGuideVersions.length - 1]?.version_number ?? null
   const selectedGuideVersionNumber = selectedGuideVersion ?? latestGuideVersionNumber
   const latestGuideMarkdownRaw = detail.latest_guide_content ?? ""
   const activeGuideMarkdownRaw =
@@ -622,9 +678,9 @@ export default function AssignmentDetailPage() {
                   <CardTitle className="flex items-center gap-2 text-base">
                     <BookOpen className="h-4 w-4" />
                     Study Guide
-                    {detail.guide_versions.length > 0 && (
+                    {currentGuideVersions.length > 0 && (
                       <Badge variant="outline" className="text-xs">
-                        v{detail.guide_versions[detail.guide_versions.length - 1]?.version_number ?? 1}
+                        v{currentGuideVersions[currentGuideVersions.length - 1]?.version_number ?? 1}
                       </Badge>
                     )}
                   </CardTitle>
@@ -634,14 +690,14 @@ export default function AssignmentDetailPage() {
                         guideMarkdown={latestGuideMarkdownRaw}
                         assignmentTitle={detail.title}
                         courseName={detail.course_name ?? undefined}
-                        versions={detail.guide_versions}
-                        sessionId={detail.latest_session_id ?? undefined}
+                        versions={currentGuideVersions}
+                        sessionId={selectedGuideSessionId ?? undefined}
                         stripThinkBlocks
                       />
                     )}
-                    {detail.latest_session_id && (
+                    {selectedGuideSessionId && (
                       <Button variant="outline" size="sm" asChild>
-                        <Link href={`/dashboard/chat?session=${detail.latest_session_id}`}>
+                        <Link href={`/dashboard/chat?session=${selectedGuideSessionId}`}>
                           <MessageSquare className="h-3.5 w-3.5 mr-1.5" />
                           Chat
                         </Link>
@@ -651,7 +707,28 @@ export default function AssignmentDetailPage() {
                 </div>
               </CardHeader>
               <CardContent>
-                {detail.guide_versions.length > 1 && selectedGuideVersionNumber !== null && (
+                {detail.guide_sessions.length > 1 && (
+                  <div className="mb-3 flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground shrink-0">Guide from:</span>
+                    <select
+                      value={selectedGuideSessionId ?? ""}
+                      onChange={(e) => { void handleGuideSessionChange(e.target.value) }}
+                      className="h-7 rounded-md border border-border bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                    >
+                      {detail.guide_sessions.map((s) => (
+                        <option key={s.session_id} value={s.session_id}>
+                          {new Date(s.created_at).toLocaleDateString(undefined, {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                          })}
+                          {s.version_count > 1 ? ` (${s.version_count} versions)` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                {currentGuideVersions.length > 1 && selectedGuideVersionNumber !== null && (
                   <motion.div
                     className="mb-3 overflow-x-auto pb-1"
                     initial={{ opacity: 0 }}
@@ -671,7 +748,7 @@ export default function AssignmentDetailPage() {
                           "h-auto w-max justify-start rounded-full border border-border/70 bg-muted/65 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] backdrop-blur-sm",
                         )}
                       >
-                        {detail.guide_versions.map((version) => (
+                        {currentGuideVersions.map((version) => (
                           <TabsTrigger
                             key={version.version_number}
                             value={String(version.version_number)}
@@ -956,10 +1033,10 @@ export default function AssignmentDetailPage() {
                   <span className="text-muted-foreground">Chat sessions</span>
                   <span className="font-medium">{detail.sessions.length}</span>
                 </div>
-                {detail.guide_versions.length > 0 && (
+                {currentGuideVersions.length > 0 && (
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Guide versions</span>
-                    <span className="font-medium">{detail.guide_versions.length}</span>
+                    <span className="font-medium">{currentGuideVersions.length}</span>
                   </div>
                 )}
               </CardContent>

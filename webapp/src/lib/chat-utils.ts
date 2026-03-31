@@ -19,6 +19,9 @@ export function normalizeResult(result: unknown) {
 }
 
 export function extractGuideMarkdown(result: unknown) {
+  if (result == null) {
+    return ""
+  }
   const data = normalizeResult(result) as Record<string, unknown> | null
   if (typeof data?.guideMarkdown === "string" && data.guideMarkdown.trim()) {
     return data.guideMarkdown

@@ -86,6 +86,7 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
   const assistantThinkingCount = Math.max(
     assistantThinkState?.thinkBlockCount ?? 0,
     assistantThinkState?.isThinking ? 1 : 0,
+    isLatestStreamingAssistant && !assistantVisibleText ? 1 : 0,
   )
   const showAssistantThinking =
     isLatestStreamingAssistant &&

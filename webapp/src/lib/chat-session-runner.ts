@@ -824,7 +824,7 @@ async function runGuideRegeneration(input: {
   try {
     patchRuntimeSession(sessionId, {
       status: "running",
-      stage: "chat_streaming",
+      stage: "streaming_output",
       progressPercent: 97,
       statusMessage: `Updating guide (v${versionNumber})`,
       error: undefined,
@@ -894,7 +894,7 @@ async function runGuideRegeneration(input: {
       if (event === "chat.started") {
         patchRuntimeSession(sessionId, {
           status: "running",
-          stage: "chat_streaming",
+          stage: "streaming_output",
           progressPercent: toPercent(data.progress_percent, 97),
           statusMessage: `Updating guide (v${versionNumber})`,
         });

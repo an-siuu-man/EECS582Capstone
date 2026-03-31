@@ -93,6 +93,19 @@ export function ChatThread({
     session?.status === "completed"
       ? "rounded-lg border border-emerald-300/60 bg-emerald-50/80 p-3 text-[15px]"
       : "rounded-lg border border-brand-gold/40 bg-brand-gold/10 p-3 text-[15px]"
+  const shouldShowWelcomeMessage = Boolean(
+    session &&
+      session.status === "completed" &&
+      !hasGuideContent &&
+      session.messages.length === 0,
+  )
+  const rawAssignmentTitle =
+    typeof session?.payload?.title === "string" ? session.payload.title.trim() : ""
+  const assignmentTitle = rawAssignmentTitle || "this assignment"
+  const welcomeMessageText = `Hi! How may I help you with ${assignmentTitle}?`
+  const welcomeCreatedAt = session
+    ? new Date(session.created_at).toISOString()
+    : new Date().toISOString()
 
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
@@ -134,7 +147,7 @@ export function ChatThread({
                   className="mx-auto w-full max-w-4xl space-y-1 px-1 py-1"
                 >
                   {Array.from({
-                    length: Math.max(guideThinkBlockCount, isThinking ? 1 : 0),
+                    length: Math.max(1, guideThinkBlockCount, isThinking ? 1 : 0),
                   }).map((_, index) => (
                     <ThinkingMessage key={`guide-thinking-${index}`} reduceMotion={reduceMotion} />
                   ))}
@@ -165,6 +178,22 @@ export function ChatThread({
               <div className="rounded-md border border-red-200 bg-red-50 p-3 text-[15px] text-red-800">
                 Error generating guide: {session.error || "Unknown error"}
               </div>
+            ) : null}
+
+            {shouldShowWelcomeMessage ? (
+              <ChatMessageBubble
+                message={{
+                  id: `welcome-${sessionId}`,
+                  message_index: 1,
+                  sender_role: "assistant",
+                  content_text: welcomeMessageText,
+                  content_format: "markdown",
+                  metadata: { synthetic: true },
+                  created_at: welcomeCreatedAt,
+                }}
+                isLatestStreamingAssistant={false}
+                reduceMotion={reduceMotion}
+              />
             ) : null}
 
             {(session?.messages ?? []).map((message) => {
