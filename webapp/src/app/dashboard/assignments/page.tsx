@@ -416,7 +416,6 @@ function AssignmentList({
             : "Mark as submitted"
           const fullCourseName = assignment.course_name?.trim() || "Unknown course"
           const courseName = truncateWithEllipsis(fullCourseName, MAX_COURSE_NAME_LENGTH)
-          const isCourseNameTruncated = courseName !== fullCourseName
 
           return (
             <motion.div
@@ -428,20 +427,14 @@ function AssignmentList({
               <Card className="flex h-full flex-col transition-shadow hover:shadow-md">
                 <CardHeader className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 space-y-0 pb-2">
                   <div className="min-w-0 space-y-1">
-                    {isCourseNameTruncated ? (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Badge variant="outline" className="mb-2 max-w-[32ch] shrink justify-start">
-                            <span className="block max-w-full truncate">{courseName}</span>
-                          </Badge>
-                        </TooltipTrigger>
-                        <TooltipContent>{fullCourseName}</TooltipContent>
-                      </Tooltip>
-                    ) : (
-                      <Badge variant="outline" className="mb-2 max-w-[32ch] shrink justify-start">
-                        <span className="block max-w-full truncate">{courseName}</span>
-                      </Badge>
-                    )}
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Badge variant="outline" className="mb-2 max-w-[32ch] shrink justify-start">
+                          <span className="block max-w-full truncate">{courseName}</span>
+                        </Badge>
+                      </TooltipTrigger>
+                      <TooltipContent>{fullCourseName}</TooltipContent>
+                    </Tooltip>
                     <CardTitle className="line-clamp-2 break-words text-base leading-snug" title={assignment.title}>
                       {assignment.title}
                     </CardTitle>
