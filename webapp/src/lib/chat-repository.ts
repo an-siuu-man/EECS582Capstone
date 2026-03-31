@@ -1550,6 +1550,91 @@ async function userOwnsAssignment(userId: string, assignmentId: string) {
   return Boolean(integration);
 }
 
+export async function deletePersistedAssignmentForUser(input: {
+  userId: string;
+  assignmentId: string;
+}) {
+  const owned = await userOwnsAssignment(input.userId, input.assignmentId);
+  if (!owned) {
+    return null;
+  }
+
+  const snapshotRows = await selectMany<DbAssignmentSnapshot>({
+    table: "assignment_snapshots",
+    query: {
+      assignment_id: eq(input.assignmentId),
+      select: "id",
+      limit: 1000,
+    },
+  });
+  const snapshotIds = Array.from(new Set(snapshotRows.map((row) => row.id)));
+
+  const ingestRows =
+    snapshotIds.length > 0
+      ? await selectMany<DbAssignmentIngest>({
+          table: "assignment_ingests",
+          query: {
+            assignment_snapshot_id: inList(snapshotIds),
+            select: "assignment_uuid,assignment_snapshot_id",
+            limit: 2000,
+          },
+        })
+      : [];
+  const assignmentUuids = Array.from(
+    new Set(ingestRows.map((row) => row.assignment_uuid)),
+  );
+
+  const sessionRows =
+    assignmentUuids.length > 0
+      ? await selectMany<DbChatSession>({
+          table: "chat_sessions",
+          query: {
+            user_id: eq(input.userId),
+            assignment_uuid: inList(assignmentUuids),
+            select: "id,user_id,assignment_uuid,status,created_at,updated_at",
+            limit: 2000,
+          },
+        })
+      : [];
+
+  const deletedSessionIds: string[] = [];
+  let ingestDeletedCount = 0;
+  let snapshotDeletedCount = 0;
+  let attachmentRecordsDeleted = 0;
+  let blobsDeleted = 0;
+
+  for (const session of sessionRows) {
+    const deleted = await deletePersistedChatSessionForUser({
+      sessionId: session.id,
+      userId: input.userId,
+    });
+    if (!deleted) continue;
+    deletedSessionIds.push(deleted.sessionId);
+    if (deleted.ingestDeleted) ingestDeletedCount += 1;
+    if (deleted.snapshotDeleted) snapshotDeletedCount += 1;
+    attachmentRecordsDeleted += deleted.attachmentRecordsDeleted;
+    blobsDeleted += deleted.blobsDeleted;
+  }
+
+  await deleteMany({
+    table: "assignment_user_states",
+    query: {
+      assignment_id: eq(input.assignmentId),
+      user_id: eq(input.userId),
+    },
+  });
+
+  return {
+    assignmentId: input.assignmentId,
+    deletedSessionIds,
+    deletedSessionCount: deletedSessionIds.length,
+    ingestDeletedCount,
+    snapshotDeletedCount,
+    attachmentRecordsDeleted,
+    blobsDeleted,
+  };
+}
+
 export async function setAssignmentSubmittedStateForUser(input: {
   userId: string;
   assignmentId: string;
