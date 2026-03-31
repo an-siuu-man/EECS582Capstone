@@ -58,6 +58,7 @@ type AssignmentItem = {
 }
 
 const EASE_OUT = [0.22, 1, 0.36, 1] as const
+const MAX_COURSE_NAME_LENGTH = 48
 
 function priorityTone(priority: AssignmentItem["priority"]) {
   if (priority === "High") return "border-red-200/80 bg-red-50 text-red-700"
@@ -76,6 +77,12 @@ function parseIsoDate(value: string | null | undefined) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return null
   return date
+}
+
+function truncateWithEllipsis(value: string, maxLength: number) {
+  const normalizedValue = value.trim()
+  if (normalizedValue.length <= maxLength) return normalizedValue
+  return `${normalizedValue.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`
 }
 
 export default function AssignmentsPage() {
@@ -407,6 +414,9 @@ function AssignmentList({
           const submitTooltip = assignment.is_submitted
             ? "Mark as not submitted"
             : "Mark as submitted"
+          const fullCourseName = assignment.course_name?.trim() || "Unknown course"
+          const courseName = truncateWithEllipsis(fullCourseName, MAX_COURSE_NAME_LENGTH)
+          const isCourseNameTruncated = courseName !== fullCourseName
 
           return (
             <motion.div
@@ -416,19 +426,30 @@ function AssignmentList({
               transition={{ duration: 0.2, ease: EASE_OUT }}
             >
               <Card className="flex h-full flex-col transition-shadow hover:shadow-md">
-                <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
-                  <div className="space-y-1">
-                    <Badge variant="outline" className="mb-2">
-                      {assignment.course_name || "Unknown course"}
-                    </Badge>
-                    <CardTitle className="line-clamp-2 text-base" title={assignment.title}>
+                <CardHeader className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 space-y-0 pb-2">
+                  <div className="min-w-0 space-y-1">
+                    {isCourseNameTruncated ? (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Badge variant="outline" className="mb-2 max-w-[32ch] shrink justify-start">
+                            <span className="block max-w-full truncate">{courseName}</span>
+                          </Badge>
+                        </TooltipTrigger>
+                        <TooltipContent>{fullCourseName}</TooltipContent>
+                      </Tooltip>
+                    ) : (
+                      <Badge variant="outline" className="mb-2 max-w-[32ch] shrink justify-start">
+                        <span className="block max-w-full truncate">{courseName}</span>
+                      </Badge>
+                    )}
+                    <CardTitle className="line-clamp-2 break-words text-base leading-snug" title={assignment.title}>
                       {assignment.title}
                     </CardTitle>
                     <CardDescription className="text-xs">
                       Attachments: {assignment.attachment_count}
                     </CardDescription>
                   </div>
-                  <div className="ml-2 flex shrink-0 items-center gap-1">
+                  <div className="flex shrink-0 items-center gap-1 self-start">
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Button

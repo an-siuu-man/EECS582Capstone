@@ -61,14 +61,15 @@
 
 :root {
   --radius: 0.625rem;
-  --font-apple-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
-    "Helvetica Neue", Helvetica, Arial, sans-serif;
-  --font-apple-mono: "SF Mono", "SFMono-Regular", ui-monospace, Menlo, Monaco, Consolas,
-    "Liberation Mono", "Courier New", monospace;
-  --font-sans-stack: var(--font-apple-sans), var(--font-body), sans-serif;
-  --font-markdown-stack: var(--font-apple-sans), var(--font-lexend), var(--font-body),
+  --font-apple-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display";
+  --font-apple-mono: "SF Mono", "SFMono-Regular", ui-monospace, Menlo, Monaco, Consolas;
+  --font-sans-stack: var(--font-apple-sans), var(--font-body), "Helvetica Neue", Helvetica, Arial,
     sans-serif;
-  --font-mono-stack: var(--font-apple-mono), var(--font-space-mono), monospace;
+  --font-markdown-stack: var(--font-apple-sans), var(--font-body), sans-serif;
+  --font-markdown-mono-stack: var(--font-apple-mono), "Liberation Mono", "Courier New",
+    monospace;
+  --font-mono-stack: var(--font-apple-mono), var(--font-body), "Liberation Mono", "Courier New",
+    monospace;
   
   /* Brand Colors */
   --brand-blue: #0051BA;
@@ -175,6 +176,10 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+
+  :where(p, li, blockquote, figcaption, td, th, label) {
+    font-family: var(--font-sans-stack);
   }
 
   :where(code, kbd, samp, pre) {
