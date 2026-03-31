@@ -68,14 +68,16 @@ export async function GET(
       latestAssignmentUuid,
       sessions,
       latestSessionId,
+      latestGuideSessionId,
+      guideSessions,
     } = detail;
 
     const [submissionStates, guideData, pdfFiles] = await Promise.all([
       listAssignmentSubmissionStatesForUser(userId, [normalizedId]),
-      latestSessionId
+      latestGuideSessionId
         ? Promise.all([
-            getLatestGuideVersion(latestSessionId),
-            listGuideVersions(latestSessionId),
+            getLatestGuideVersion(latestGuideSessionId),
+            listGuideVersions(latestGuideSessionId),
           ])
         : Promise.resolve([null, []] as const),
       latestAssignmentUuid
@@ -161,6 +163,14 @@ export async function GET(
         updated_at: s.updatedAt,
       })),
       latest_session_id: latestSessionId,
+      latest_guide_session_id: latestGuideSessionId,
+      guide_sessions: guideSessions.map((s) => ({
+        session_id: s.sessionId,
+        title: s.title,
+        version_count: s.versionCount,
+        latest_guide_at: s.latestGuideAt,
+        created_at: s.createdAt,
+      })),
       latest_guide_content:
         (latestGuide as { content_text?: string } | null)?.content_text ??
         null,

@@ -93,6 +93,19 @@ export function ChatThread({
     session?.status === "completed"
       ? "rounded-lg border border-emerald-300/60 bg-emerald-50/80 p-3 text-[15px]"
       : "rounded-lg border border-brand-gold/40 bg-brand-gold/10 p-3 text-[15px]"
+  const shouldShowWelcomeMessage = Boolean(
+    session &&
+      session.status === "completed" &&
+      !hasGuideContent &&
+      session.messages.length === 0,
+  )
+  const rawAssignmentTitle =
+    typeof session?.payload?.title === "string" ? session.payload.title.trim() : ""
+  const assignmentTitle = rawAssignmentTitle || "this assignment"
+  const welcomeMessageText = `Hi! How may I help you with ${assignmentTitle}?`
+  const welcomeCreatedAt = session
+    ? new Date(session.created_at).toISOString()
+    : new Date().toISOString()
 
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
@@ -134,7 +147,7 @@ export function ChatThread({
                   className="mx-auto w-full max-w-4xl space-y-1 px-1 py-1"
                 >
                   {Array.from({
-                    length: Math.max(guideThinkBlockCount, isThinking ? 1 : 0),
+                    length: Math.max(1, guideThinkBlockCount, isThinking ? 1 : 0),
                   }).map((_, index) => (
                     <ThinkingMessage key={`guide-thinking-${index}`} reduceMotion={reduceMotion} />
                   ))}
@@ -152,7 +165,7 @@ export function ChatThread({
                   transition={reduceMotion ? undefined : { duration: 0.35, ease: EASE_OUT }}
                   className="mx-auto min-w-0 w-full max-w-4xl p-1 text-left text-[15px] leading-6"
                 >
-                  <div className="[font-family:var(--font-markdown-stack)] [&_a]:font-medium [&_a]:text-blue-600 [&_a]:underline [&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:italic [&_code]:[font-family:var(--font-markdown-mono-stack)] [&_code]:break-words [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_h1]:mt-6 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:tracking-tight [&_h1:first-child]:mt-0 [&_h2]:mt-5 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:tracking-tight [&_h2:first-child]:mt-0 [&_h3]:mt-4 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:tracking-tight [&_h3:first-child]:mt-0 [&_h4]:mt-4 [&_h4]:text-base [&_h4]:font-semibold [&_hr]:my-6 [&_li]:my-1 [&_li]:break-words [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-3 [&_p]:break-words [&_p]:font-light [&_pre]:[font-family:var(--font-markdown-mono-stack)] [&_pre]:my-3 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_strong]:font-semibold [&_table]:w-full [&_table]:min-w-[28rem] [&_table]:border-separate [&_table]:border-spacing-0 [&_table]:rounded-md [&_table]:border [&_table]:border-border/70 [&_thead]:bg-muted/45 [&_th]:border-b [&_th]:border-border/70 [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:text-[13px] [&_th]:font-semibold [&_td]:border-b [&_td]:border-border/50 [&_td]:px-2 [&_td]:py-1.5 [&_td]:text-[13px] [&_tbody_tr:last-child_td]:border-b-0 [&_tbody_tr:nth-child(even)]:bg-muted/25 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5">
+                  <div className="font-body [&_a]:font-medium [&_a]:text-blue-600 [&_a]:underline [&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:italic [&_code]:font-code [&_code]:break-words [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_h1]:mt-6 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:tracking-tight [&_h1:first-child]:mt-0 [&_h2]:mt-5 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:tracking-tight [&_h2:first-child]:mt-0 [&_h3]:mt-4 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:tracking-tight [&_h3:first-child]:mt-0 [&_h4]:mt-4 [&_h4]:text-base [&_h4]:font-semibold [&_hr]:my-6 [&_li]:my-1 [&_li]:break-words [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-3 [&_p]:break-words [&_p]:font-light [&_pre]:font-code [&_pre]:my-3 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_strong]:font-semibold [&_table]:w-full [&_table]:min-w-[28rem] [&_table]:border-separate [&_table]:border-spacing-0 [&_table]:rounded-md [&_table]:border [&_table]:border-border/70 [&_thead]:bg-muted/45 [&_th]:border-b [&_th]:border-border/70 [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:text-[13px] [&_th]:font-semibold [&_td]:border-b [&_td]:border-border/50 [&_td]:px-2 [&_td]:py-1.5 [&_td]:text-[13px] [&_tbody_tr:last-child_td]:border-b-0 [&_tbody_tr:nth-child(even)]:bg-muted/25 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5">
                     <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
                       {guideMarkdown}
                     </ReactMarkdown>
@@ -165,6 +178,22 @@ export function ChatThread({
               <div className="rounded-md border border-red-200 bg-red-50 p-3 text-[15px] text-red-800">
                 Error generating guide: {session.error || "Unknown error"}
               </div>
+            ) : null}
+
+            {shouldShowWelcomeMessage ? (
+              <ChatMessageBubble
+                message={{
+                  id: `welcome-${sessionId}`,
+                  message_index: 1,
+                  sender_role: "assistant",
+                  content_text: welcomeMessageText,
+                  content_format: "markdown",
+                  metadata: { synthetic: true },
+                  created_at: welcomeCreatedAt,
+                }}
+                isLatestStreamingAssistant={false}
+                reduceMotion={reduceMotion}
+              />
             ) : null}
 
             {(session?.messages ?? []).map((message) => {

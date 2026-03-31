@@ -9,9 +9,10 @@
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-sans-stack);
-  --font-body: var(--font-body);
+  --font-body: var(--font-sans-stack);
   --font-heading: var(--font-heading);
   --font-mono: var(--font-mono-stack);
+  --font-code: var(--font-mono-stack);
   
   --color-brand-blue: var(--brand-blue);
   --color-brand-crimson: var(--brand-crimson);
@@ -61,15 +62,10 @@
 
 :root {
   --radius: 0.625rem;
-  --font-apple-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display";
-  --font-apple-mono: "SF Mono", "SFMono-Regular", ui-monospace, Menlo, Monaco, Consolas;
-  --font-sans-stack: var(--font-apple-sans), var(--font-body), "Helvetica Neue", Helvetica, Arial,
-    sans-serif;
-  --font-markdown-stack: var(--font-apple-sans), var(--font-body), sans-serif;
-  --font-markdown-mono-stack: var(--font-apple-mono), "Liberation Mono", "Courier New",
-    monospace;
-  --font-mono-stack: var(--font-apple-mono), var(--font-body), "Liberation Mono", "Courier New",
-    monospace;
+  --font-sans-stack: "SF Pro Text", "SF Pro Display", ".SFNSText", ".SFNSDisplay",
+    ".AppleSystemUIFont", "Nunito Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-mono-stack: "SF Mono", "SFMono-Regular", Menlo, Monaco, Consolas,
+    "IBM Plex Mono", "Liberation Mono", "Courier New", monospace;
   
   /* Brand Colors */
   --brand-blue: #0051BA;
@@ -176,10 +172,15 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-family: var(--font-sans-stack);
   }
 
   :where(p, li, blockquote, figcaption, td, th, label) {
     font-family: var(--font-sans-stack);
+  }
+
+  :where(button, input, textarea, select) {
+    font-family: inherit;
   }
 
   :where(code, kbd, samp, pre) {

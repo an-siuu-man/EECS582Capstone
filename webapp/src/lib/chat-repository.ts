@@ -875,6 +875,36 @@ export async function createPersistedChatSession(input: {
   };
 }
 
+export async function createChatSessionFromExistingSnapshot(input: {
+  userId: string;
+  snapshotId: string;
+  title: string;
+}): Promise<{ sessionId: string; assignmentUuid: string }> {
+  const assignmentUuid = crypto.randomUUID();
+
+  await insertSingle<DbAssignmentIngest>({
+    table: "assignment_ingests",
+    row: {
+      assignment_uuid: assignmentUuid,
+      assignment_snapshot_id: input.snapshotId,
+      request_id: null,
+    },
+  });
+
+  const session = await insertSingle<DbChatSession>({
+    table: "chat_sessions",
+    row: {
+      user_id: input.userId,
+      assignment_uuid: assignmentUuid,
+      title: input.title,
+      status: "completed",
+      updated_at: nowIso(),
+    },
+  });
+
+  return { sessionId: session.id, assignmentUuid };
+}
+
 export async function getPersistedSessionSnapshot(
   sessionId: string,
 ): Promise<PersistedSessionSnapshot | null> {
@@ -1936,6 +1966,14 @@ export type AssignmentDetailSession = {
   updatedAt: number;
 };
 
+export type GuideSessionInfo = {
+  sessionId: string;
+  title: string;
+  versionCount: number;
+  latestGuideAt: string;
+  createdAt: number;
+};
+
 export type AssignmentDetailResult = {
   payload: AssignmentPayload;
   snapshotDescriptionText: string | null;
@@ -1944,6 +1982,9 @@ export type AssignmentDetailResult = {
   snapshotPointsPossible: number | null;
   snapshotSubmissionType: string | null;
   latestAssignmentUuid: string | null;
+  latestSnapshotId: string | null;
+  guideSessions: GuideSessionInfo[];
+  latestGuideSessionId: string | null;
   sessions: AssignmentDetailSession[];
   latestSessionId: string | null;
 };
@@ -2008,6 +2049,44 @@ function toEpochOrFallback(value: string | null | undefined, fallback: number) {
   if (!value) return fallback;
   const ts = Date.parse(value);
   return Number.isNaN(ts) ? fallback : ts;
+}
+
+async function buildGuideSessionInfos(
+  sessions: DbChatSession[],
+): Promise<GuideSessionInfo[]> {
+  if (sessions.length === 0) return [];
+  const sessionIds = sessions.map((s) => s.id);
+
+  const rows = await selectMany<{ session_id: string; version_number: number; created_at: string }>({
+    table: "guide_versions",
+    query: {
+      session_id: inList(sessionIds),
+      select: "session_id,version_number,created_at",
+      order: "session_id.asc,version_number.asc",
+    },
+  });
+
+  const countMap = new Map<string, { count: number; latestAt: string }>();
+  for (const row of rows) {
+    const existing = countMap.get(row.session_id);
+    if (!existing) {
+      countMap.set(row.session_id, { count: 1, latestAt: row.created_at });
+    } else {
+      existing.count++;
+      existing.latestAt = row.created_at; // asc order → last entry is latest
+    }
+  }
+
+  // Preserve session order (already updated_at desc from the caller's query)
+  return sessions
+    .filter((s) => countMap.has(s.id))
+    .map((s) => ({
+      sessionId: s.id,
+      title: toOptionalString(s.title) ?? "Chat",
+      versionCount: countMap.get(s.id)!.count,
+      latestGuideAt: countMap.get(s.id)!.latestAt,
+      createdAt: toEpoch(s.created_at),
+    }));
 }
 
 export async function getAssignmentDetailForUser(input: {
@@ -2094,6 +2173,9 @@ export async function getAssignmentDetailForUser(input: {
     updatedAt: toEpoch(session.updated_at),
   }));
 
+  const guideSessions = await buildGuideSessionInfos(sessionRows);
+  const latestGuideSessionId = guideSessions[0]?.sessionId ?? null;
+
   return {
     payload,
     snapshotDescriptionText: toOptionalString(latestSnapshot.description_text) ?? null,
@@ -2102,6 +2184,9 @@ export async function getAssignmentDetailForUser(input: {
     snapshotPointsPossible: typeof latestSnapshot.points_possible === "number" ? latestSnapshot.points_possible : null,
     snapshotSubmissionType: toOptionalString(latestSnapshot.submission_type) ?? null,
     latestAssignmentUuid,
+    latestSnapshotId: latestSnapshot.id,
+    guideSessions,
+    latestGuideSessionId,
     sessions,
     latestSessionId: latestSession?.id ?? null,
   };

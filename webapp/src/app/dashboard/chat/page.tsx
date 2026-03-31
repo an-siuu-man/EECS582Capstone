@@ -35,6 +35,22 @@ const STAGE_BADGE_TONES = [
   "border-lime-400/60 bg-lime-500/15 text-lime-800 dark:text-lime-200",
   "border-indigo-400/60 bg-indigo-500/15 text-indigo-800 dark:text-indigo-200",
 ] as const
+const GUIDE_PROGRESS_STAGES = new Set([
+  "queued",
+  "preparing_payload",
+  "extracting_pdf",
+  "calling_agent",
+  "streaming_output",
+  "validating_output",
+  "parsing_response",
+])
+
+function isGuideGenerationInProgress(session: ChatSessionDto) {
+  if (session.status !== "queued" && session.status !== "running") {
+    return false
+  }
+  return GUIDE_PROGRESS_STAGES.has(session.stage)
+}
 
 function ChatPageFallback() {
   return (
@@ -76,7 +92,6 @@ function DashboardChatPageContent() {
   const latestAssistantMessageIdRef = useRef<string | null>(null)
   const previousGuideLengthRef = useRef(0)
   const lastScrollTimeRef = useRef(0)
-  const progressHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const reduceMotion = useReducedMotion()
 
   function getThreadViewport() {
@@ -190,25 +205,16 @@ function DashboardChatPageContent() {
       setIsPolling(false)
       setErrorText(null)
 
-      if (progressHideTimerRef.current) {
-        clearTimeout(progressHideTimerRef.current)
-        progressHideTimerRef.current = null
-      }
-      if (nextSession.status === "queued" || nextSession.status === "running") {
+      if (isGuideGenerationInProgress(nextSession)) {
         setShowProgressPanel(true)
         setDisplayProgress(
           Math.max(0, Math.min(100, Math.round(nextSession.progress_percent))),
         )
-      } else if (nextSession.status === "completed") {
-        setShowProgressPanel(true)
-        setDisplayProgress(100)
-        progressHideTimerRef.current = setTimeout(() => {
-          setShowProgressPanel(false)
-          progressHideTimerRef.current = null
-        }, 900)
       } else if (nextSession.status === "failed") {
         setShowProgressPanel(false)
         setDisplayProgress(100)
+      } else {
+        setShowProgressPanel(false)
       }
     }
 
@@ -370,10 +376,6 @@ function DashboardChatPageContent() {
 
     return () => {
       isDisposed = true
-      if (progressHideTimerRef.current) {
-        clearTimeout(progressHideTimerRef.current)
-        progressHideTimerRef.current = null
-      }
       eventSource.close()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -481,11 +483,10 @@ function DashboardChatPageContent() {
   } = useMemo(() => removeThinkBlocks(rawGuideMarkdown), [rawGuideMarkdown])
 
   const hasGuideContent = guideMarkdown.trim().length > 0
-  const isGuideStreaming =
-    effectiveSession?.status === "running" || effectiveSession?.status === "queued"
-  const showThinkingIndicator = Boolean(
-    !hasGuideContent && isGuideStreaming && (guideThinkBlockCount > 0 || isThinking),
+  const isGuideStreaming = Boolean(
+    effectiveSession && isGuideGenerationInProgress(effectiveSession),
   )
+  const showThinkingIndicator = Boolean(!hasGuideContent && isGuideStreaming)
 
   useEffect(() => {
     const currentLength = guideMarkdown.length
