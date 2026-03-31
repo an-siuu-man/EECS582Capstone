@@ -1917,3 +1917,130 @@ export async function getHighestMessageIndex(sessionId: string): Promise<number>
   });
   return row?.message_index ?? 0;
 }
+
+type DbAssignmentSnapshotFull = DbAssignmentSnapshot & {
+  description_text?: string | null;
+  description_html?: string | null;
+  rubric_json?: unknown;
+  points_possible?: number | null;
+  submission_type?: string | null;
+  source?: string | null;
+};
+
+export type AssignmentDetailSession = {
+  sessionId: string;
+  title: string;
+  lastUserMessage: string | null;
+  status: ChatSessionStatus;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type AssignmentDetailResult = {
+  payload: AssignmentPayload;
+  snapshotDescriptionText: string | null;
+  snapshotDescriptionHtml: string | null;
+  snapshotRubricJson: unknown;
+  snapshotPointsPossible: number | null;
+  snapshotSubmissionType: string | null;
+  latestAssignmentUuid: string | null;
+  sessions: AssignmentDetailSession[];
+  latestSessionId: string | null;
+};
+
+export async function getAssignmentDetailForUser(input: {
+  userId: string;
+  assignmentId: string;
+}): Promise<AssignmentDetailResult | null> {
+  const owned = await userOwnsAssignment(input.userId, input.assignmentId);
+  if (!owned) return null;
+
+  const snapshotRows = await selectMany<DbAssignmentSnapshotFull>({
+    table: "assignment_snapshots",
+    query: {
+      assignment_id: eq(input.assignmentId),
+      select: "id,assignment_id,title,due_at,raw_payload,description_text,description_html,rubric_json,points_possible,submission_type,source",
+      limit: 100,
+    },
+  });
+
+  if (snapshotRows.length === 0) return null;
+
+  const latestSnapshot = snapshotRows[0]!;
+  const snapshotIds = snapshotRows.map((s) => s.id);
+
+  const ingestRows = await selectMany<DbAssignmentIngest>({
+    table: "assignment_ingests",
+    query: {
+      assignment_snapshot_id: inList(snapshotIds),
+      select: "assignment_uuid,assignment_snapshot_id",
+      limit: 1000,
+    },
+  });
+
+  const assignmentUuids = Array.from(new Set(ingestRows.map((r) => r.assignment_uuid)));
+
+  const sessionRows =
+    assignmentUuids.length > 0
+      ? await selectMany<DbChatSession>({
+          table: "chat_sessions",
+          query: {
+            user_id: eq(input.userId),
+            assignment_uuid: inList(assignmentUuids),
+            select: "id,user_id,assignment_uuid,title,status,created_at,updated_at",
+            order: "updated_at.desc",
+            limit: 100,
+          },
+        })
+      : [];
+
+  const sessionIds = sessionRows.map((s) => s.id);
+
+  const userMessages =
+    sessionIds.length > 0
+      ? await selectMany<DbChatMessageListPreview>({
+          table: "chat_messages",
+          query: {
+            session_id: inList(sessionIds),
+            sender_role: eq("user"),
+            select: "session_id,message_index,content_text",
+            order: "session_id.asc,message_index.desc",
+          },
+        })
+      : [];
+
+  const lastUserMsgBySessionId = new Map<string, string | null>();
+  for (const msg of userMessages) {
+    if (!lastUserMsgBySessionId.has(msg.session_id)) {
+      lastUserMsgBySessionId.set(msg.session_id, toOptionalString(msg.content_text));
+    }
+  }
+
+  const payload = sanitizePayloadForResponse(
+    asObject(latestSnapshot.raw_payload) as AssignmentPayload,
+  );
+
+  const latestSession = sessionRows[0] ?? null;
+  const latestAssignmentUuid = latestSession?.assignment_uuid ?? null;
+
+  const sessions: AssignmentDetailSession[] = sessionRows.map((session) => ({
+    sessionId: session.id,
+    title: toOptionalString(session.title) ?? toTitle(payload),
+    lastUserMessage: lastUserMsgBySessionId.get(session.id) ?? null,
+    status: session.status,
+    createdAt: toEpoch(session.created_at),
+    updatedAt: toEpoch(session.updated_at),
+  }));
+
+  return {
+    payload,
+    snapshotDescriptionText: toOptionalString(latestSnapshot.description_text) ?? null,
+    snapshotDescriptionHtml: toOptionalString(latestSnapshot.description_html) ?? null,
+    snapshotRubricJson: latestSnapshot.rubric_json ?? null,
+    snapshotPointsPossible: typeof latestSnapshot.points_possible === "number" ? latestSnapshot.points_possible : null,
+    snapshotSubmissionType: toOptionalString(latestSnapshot.submission_type) ?? null,
+    latestAssignmentUuid,
+    sessions,
+    latestSessionId: latestSession?.id ?? null,
+  };
+}

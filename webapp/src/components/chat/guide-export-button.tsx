@@ -5,6 +5,7 @@ import { FileText, FileDown } from "lucide-react"
 import { format } from "date-fns"
 import { Button } from "@/components/ui/button"
 import { type GuideVersionMeta } from "@/lib/chat-types"
+import { removeThinkBlocks } from "@/lib/chat-utils"
 
 type GuideExportButtonProps = {
   guideMarkdown: string
@@ -12,6 +13,7 @@ type GuideExportButtonProps = {
   courseName?: string
   versions?: GuideVersionMeta[]
   sessionId?: string
+  stripThinkBlocks?: boolean
 }
 
 function slugify(text: string): string {
@@ -101,6 +103,7 @@ export function GuideExportButton({
   courseName,
   versions = [],
   sessionId,
+  stripThinkBlocks = false,
 }: GuideExportButtonProps) {
   const [open, setOpen] = useState(false)
   const [loadingVersion, setLoadingVersion] = useState<number | null>(null)
@@ -109,16 +112,23 @@ export function GuideExportButton({
   const latestVersion = versions.length > 0 ? versions[versions.length - 1] : null
   const olderVersions = versions.length > 1 ? versions.slice(0, -1).reverse() : []
 
+  function getMarkdownForExport(markdown: string) {
+    if (!stripThinkBlocks) return markdown
+    return removeThinkBlocks(markdown).visibleMarkdown
+  }
+
   function exportCurrentMarkdown() {
     const suffix = latestVersion ? `v${latestVersion.version_number}` : undefined
-    downloadMarkdown(guideMarkdown, buildFilename(assignmentTitle, courseName, "md", suffix))
+    const markdownToExport = getMarkdownForExport(guideMarkdown)
+    downloadMarkdown(markdownToExport, buildFilename(assignmentTitle, courseName, "md", suffix))
     setOpen(false)
   }
 
   async function exportCurrentPdf() {
     setOpen(false)
     const suffix = latestVersion ? `v${latestVersion.version_number}` : undefined
-    await printMarkdownAsPdf(guideMarkdown, buildFilename(assignmentTitle, courseName, "pdf", suffix))
+    const markdownToExport = getMarkdownForExport(guideMarkdown)
+    await printMarkdownAsPdf(markdownToExport, buildFilename(assignmentTitle, courseName, "pdf", suffix))
   }
 
   async function exportOlderVersion(versionNumber: number, ext: "md" | "pdf") {
@@ -132,11 +142,12 @@ export function GuideExportButton({
       if (!res.ok) return
       const body = await res.json() as { content_text?: string }
       if (!body.content_text) return
+      const markdownToExport = getMarkdownForExport(body.content_text)
       const suffix = `v${versionNumber}`
       if (ext === "md") {
-        downloadMarkdown(body.content_text, buildFilename(assignmentTitle, courseName, "md", suffix))
+        downloadMarkdown(markdownToExport, buildFilename(assignmentTitle, courseName, "md", suffix))
       } else {
-        await printMarkdownAsPdf(body.content_text, buildFilename(assignmentTitle, courseName, "pdf", suffix))
+        await printMarkdownAsPdf(markdownToExport, buildFilename(assignmentTitle, courseName, "pdf", suffix))
       }
     } finally {
       setLoadingVersion(null)
