@@ -19,7 +19,7 @@
  */
 
 import type { Metadata } from "next";
-import { Nunito_Sans, Quattrocento, Lexend, Space_Mono } from "next/font/google";
+import { Nunito_Sans, Quattrocento, Lexend, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 
@@ -30,7 +30,7 @@ const quattrocento = Quattrocento({
 });
 
 const nunitoSans = Nunito_Sans({
-  weight: "400",
+  weight: ["300", "400", "500", "600", "700"],
   subsets: ["latin"],
   variable: "--font-body",
 });
@@ -40,10 +40,10 @@ const lexend = Lexend({
   variable: "--font-lexend",
 });
 
-const spaceMono = Space_Mono({
-  weight: ["400", "700"],
+const ibmPlexMono = IBM_Plex_Mono({
+  weight: ["400", "500", "700"],
   subsets: ["latin"],
-  variable: "--font-space-mono",
+  variable: "--font-code",
 });
 
 export const metadata: Metadata = {
@@ -58,7 +58,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${quattrocento.variable} ${nunitoSans.variable} ${lexend.variable} ${spaceMono.variable} font-sans antialiased`}>
+      <body className={`${quattrocento.variable} ${nunitoSans.variable} ${lexend.variable} ${ibmPlexMono.variable} font-sans antialiased`}>
         <ThemeProvider
           attribute="class"
           defaultTheme="system"

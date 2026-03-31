@@ -64,7 +64,7 @@ const MAX_COURSE_NAME_LENGTH = 48
 const GUIDE_REMARK_PLUGINS = [remarkGfm, remarkMath]
 const GUIDE_REHYPE_PLUGINS = [rehypeKatex]
 const GUIDE_MARKDOWN_CLASS =
-  "[font-family:var(--font-markdown-stack)] [&_a]:font-medium [&_a]:text-blue-600 [&_a]:underline [&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:italic [&_code]:[font-family:var(--font-markdown-mono-stack)] [&_code]:break-words [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_h1]:mt-6 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:tracking-tight [&_h1:first-child]:mt-0 [&_h2]:mt-5 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:tracking-tight [&_h2:first-child]:mt-0 [&_h3]:mt-4 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:tracking-tight [&_h3:first-child]:mt-0 [&_h4]:mt-4 [&_h4]:text-base [&_h4]:font-semibold [&_hr]:my-6 [&_li]:my-1 [&_li]:break-words [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-3 [&_p]:break-words [&_p]:font-light [&_pre]:[font-family:var(--font-markdown-mono-stack)] [&_pre]:my-3 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_strong]:font-semibold [&_table]:w-full [&_table]:min-w-[28rem] [&_table]:border-separate [&_table]:border-spacing-0 [&_table]:rounded-md [&_table]:border [&_table]:border-border/70 [&_thead]:bg-muted/45 [&_th]:border-b [&_th]:border-border/70 [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:text-[13px] [&_th]:font-semibold [&_td]:border-b [&_td]:border-border/50 [&_td]:px-2 [&_td]:py-1.5 [&_td]:text-[13px] [&_tbody_tr:last-child_td]:border-b-0 [&_tbody_tr:nth-child(even)]:bg-muted/25 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5"
+  "font-body [&_a]:font-medium [&_a]:text-blue-600 [&_a]:underline [&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:italic [&_code]:font-code [&_code]:break-words [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_h1]:mt-6 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:tracking-tight [&_h1:first-child]:mt-0 [&_h2]:mt-5 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:tracking-tight [&_h2:first-child]:mt-0 [&_h3]:mt-4 [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:tracking-tight [&_h3:first-child]:mt-0 [&_h4]:mt-4 [&_h4]:text-base [&_h4]:font-semibold [&_hr]:my-6 [&_li]:my-1 [&_li]:break-words [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-3 [&_p]:break-words [&_p]:font-light [&_pre]:font-code [&_pre]:my-3 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_strong]:font-semibold [&_table]:w-full [&_table]:min-w-[28rem] [&_table]:border-separate [&_table]:border-spacing-0 [&_table]:rounded-md [&_table]:border [&_table]:border-border/70 [&_thead]:bg-muted/45 [&_th]:border-b [&_th]:border-border/70 [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:text-[13px] [&_th]:font-semibold [&_td]:border-b [&_td]:border-border/50 [&_td]:px-2 [&_td]:py-1.5 [&_td]:text-[13px] [&_tbody_tr:last-child_td]:border-b-0 [&_tbody_tr:nth-child(even)]:bg-muted/25 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5"
 
 type SessionItem = {
   session_id: string
@@ -173,6 +173,22 @@ export default function AssignmentDetailPage() {
   const [guideContentByVersion, setGuideContentByVersion] = useState<Record<number, string>>({})
   const [loadingGuideVersionNumber, setLoadingGuideVersionNumber] = useState<number | null>(null)
   const [guideVersionError, setGuideVersionError] = useState<string | null>(null)
+  const [isCreatingChat, setIsCreatingChat] = useState(false)
+
+  async function handleNewChat() {
+    if (isCreatingChat || !slug) return
+    setIsCreatingChat(true)
+    try {
+      const res = await fetch(`/api/assignments/${encodeURIComponent(slug)}/new-chat`, {
+        method: "POST",
+      })
+      if (!res.ok) throw new Error("Failed to create chat")
+      const body = (await res.json()) as { session_id: string }
+      router.push(`/dashboard/chat?session=${encodeURIComponent(body.session_id)}`)
+    } catch {
+      setIsCreatingChat(false)
+    }
+  }
 
   const loadDetail = useCallback(async () => {
     if (!slug) return
@@ -740,11 +756,13 @@ export default function AssignmentDetailPage() {
                           </Link>
                         </Button>
                       ) : (
-                        <Button variant="outline" size="sm" asChild>
-                          <Link href="/dashboard/chat">
+                        <Button variant="outline" size="sm" onClick={handleNewChat} disabled={isCreatingChat}>
+                          {isCreatingChat ? (
+                            <LoaderCircle className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                          ) : (
                             <Plus className="h-3.5 w-3.5 mr-1.5" />
-                            Start a Chat
-                          </Link>
+                          )}
+                          Start a Chat
                         </Button>
                       )}
                     </motion.div>
@@ -990,11 +1008,13 @@ export default function AssignmentDetailPage() {
                     <MessageSquare className="h-3.5 w-3.5" />
                     Chat Sessions
                   </CardTitle>
-                  <Button variant="outline" size="sm" asChild>
-                    <Link href="/dashboard/chat">
+                  <Button variant="outline" size="sm" onClick={handleNewChat} disabled={isCreatingChat}>
+                    {isCreatingChat ? (
+                      <LoaderCircle className="h-3.5 w-3.5 mr-1 animate-spin" />
+                    ) : (
                       <Plus className="h-3.5 w-3.5 mr-1" />
-                      New
-                    </Link>
+                    )}
+                    New
                   </Button>
                 </div>
               </CardHeader>

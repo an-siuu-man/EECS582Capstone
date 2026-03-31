@@ -1,195 +1,42 @@
-# Headstart AI Capstone
+# Headstart AI
 
-Headstart AI is a multi-component system that helps students turn Canvas assignments into structured, actionable study guides.
-It combines a Chrome extension (Canvas extraction + in-page entrypoint), a Next.js web app (dashboard + API gateway), and a FastAPI agent service (LLM orchestration + PDF context extraction).
+Headstart AI is built for a very common student problem.
 
-## Table of Contents
+You open a Canvas assignment, there is a lot of text, maybe a rubric, maybe a PDF or two, and you need to quickly figure out what matters and how to plan your work. Headstart helps you move from "what am I even looking at?" to "here is my plan."
 
-- [What This Repository Contains](#what-this-repository-contains)
-- [Core Features](#core-features)
-- [Architecture Overview](#architecture-overview)
-- [Tech Stack](#tech-stack)
-- [Repository Structure](#repository-structure)
-- [API Surface](#api-surface)
-- [Local Development](#local-development)
-- [Testing and Quality Checks](#testing-and-quality-checks)
-- [Environment Variables](#environment-variables)
-- [Database Migrations](#database-migrations)
-- [Current State and Direction](#current-state-and-direction)
+## What using Headstart feels like
 
-## What This Repository Contains
+You start on Canvas like usual.  
+Headstart picks up the assignment context from the page.  
+You trigger guide generation.  
+Then you move into the dashboard where the guide streams in, and you can keep chatting with assignment-aware context.
 
-This monorepo has three runtime applications:
+Later, you can come back to the same session, continue the conversation, and organize your study time from the calendar view.
 
-- `extension/`: Chrome Manifest V3 extension for Canvas page detection, assignment extraction, and in-page user interaction.
-- `webapp/`: Next.js App Router application for dashboard UI and backend-for-frontend API routes used by the extension.
-- `agent_service/`: FastAPI service that runs AI guide generation workflows using LangChain + NVIDIA models.
+## The three parts (and why they matter to you)
 
-Architecture contracts and flow references live in:
+### The Chrome Extension
+This is your entry point inside Canvas. It detects assignment pages, captures assignment details, and gives you a direct way to start a guide without leaving your workflow.
 
-- `internal/architecture/` (source-of-truth boundaries/contracts)
-- `docs/` (supplementary diagrams and workflow notes)
+### The Web Dashboard
+This is where you spend most of your time after starting a guide. You can watch progress, read the final guide, ask follow-up questions, reopen past chats, and manage sessions. It is also where calendar planning happens.
 
-## Core Features
+### The Agent Service
+This is the part that does the AI-heavy lifting in the background. It processes assignment context (including attachments) and turns it into a useful, structured guide that the dashboard can stream back to you.
 
-### Extension (Canvas Runtime)
+## What you can do right now
 
-- Detects Canvas assignment pages and assignment list pages.
-- Extracts assignment details using Canvas REST API first, with DOM scraping fallback.
-- Pulls assignment context including title, course, due date, points, submission type, rubric data, attached PDFs, and user timezone when available.
-- Persists assignment records in `chrome.storage.local` with merge/upsert logic.
-- Injects a sidebar widget into Canvas pages.
-- Starts guide generation from the widget and hands users off to dashboard chat.
+- Generate assignment guides from Canvas pages.
+- Ask follow-up questions in chat with assignment context preserved.
+- Revisit previous chat sessions.
+- Delete chat sessions you no longer want.
+- Use the dashboard calendar tools to plan study blocks.
 
-### Web App (Dashboard + API Gateway)
+## Quick local setup
 
-- Provides student-facing pages for landing/login/signup, dashboard, assignments, resources, settings, streamed chat, and calendar planning.
-- Creates in-memory chat sessions (`POST /api/chat-session`) and starts agent runs.
-- Streams session updates via SSE (`GET /api/chat-session/[sessionId]/events`).
-- Supports session snapshot/poll fallback (`GET /api/chat-session/[sessionId]`).
-- Ingest endpoint for assignment handoff (`POST /api/ingest-assignment`).
-- Google Calendar integration connect/disconnect + event creation endpoints.
-- Monthly calendar planner page (`/dashboard/calendar`) with toggles for assignment due events, Google events, and Google-backed study time blocks.
-- Calendar aggregation endpoint (`GET /api/calendar/month`) for month-range event hydration.
-- Heuristic proposal generator (`POST /api/calendar/proposals/generate`) for ephemeral scheduling suggestions.
-- Legacy proxy endpoint for direct run forwarding (`POST /api/run-agent`).
+If you are running the project locally, here is the short version.
 
-### Agent Service (AI Orchestration)
-
-- Exposes legacy and versioned endpoints: `/run-agent`, `/run-agent/stream`, `/health`, `/api/v1/runs`, `/api/v1/runs/stream`, `/api/v1/health`.
-- Processes attached PDFs with native-first extraction (PyMuPDF) and selective OCR fallback.
-- Extracts visual emphasis signals (highlights, underlines, style cues) and ranks significance.
-- Streams typed run events over SSE (`run.started`, `run.stage`, `run.delta`, `run.completed`, `run.error`).
-- Generates a structured markdown guide via LangChain + NVIDIA model integration.
-
-## Architecture Overview
-
-The default end-to-end guide generation flow is:
-
-1. User opens a Canvas assignment page.
-2. Extension content script detects page type and extracts normalized assignment data.
-3. Extension background worker stores/merges assignment state in `chrome.storage.local`.
-4. User clicks `Generate Guide` in the extension widget.
-5. Extension calls web app `POST /api/chat-session`, passing payload + attachments context.
-6. Web app starts an in-memory session and opens agent SSE stream.
-7. Agent service emits run stage/delta/completion events while generating markdown.
-8. Web app aggregates stream state and re-emits session updates to dashboard SSE clients.
-9. User follows progress and final guide in web dashboard chat view.
-
-Calendar planning flow (new):
-
-1. User opens `/dashboard/calendar` month view.
-2. Frontend calls `GET /api/calendar/month` with month range + timezone.
-3. Backend returns a unified event list from assignment due dates, Google study time blocks, and other Google Calendar events.
-4. User clicks `Generate Proposals` or `Regenerate`.
-5. Frontend calls `POST /api/calendar/proposals/generate`.
-6. Backend computes heuristic suggestions, avoids busy intervals, and returns transient suggestions for optional scheduling.
-
-### Component Responsibility Boundaries
-
-- Extension owns Canvas detection, extraction, local extension state, and in-page UX.
-- Web app owns dashboard UX, calendar planning UX, session orchestration, and API gateway behavior.
-- Agent service owns LLM prompting, PDF context extraction, and response generation.
-- Canvas LMS and Google Calendar are treated as external systems.
-
-## Tech Stack
-
-### Extension (`extension/`)
-
-- Runtime: Chrome Extension Manifest V3
-- Language: JavaScript (ES modules)
-- Bundling: esbuild (content script IIFE, service worker ESM, popup IIFE)
-- Testing: Jest + jsdom + babel-jest
-- Notable libraries: `motion`, `marked`
-- Platform APIs: `chrome.runtime`, `chrome.storage.local`, `chrome.action`, `chrome.tabs`
-
-### Web App (`webapp/`)
-
-- Framework: Next.js (App Router) + React + TypeScript
-- Styling/UI: Tailwind CSS v4, shadcn/radix-style component primitives, `next-themes`
-- Motion/UI behavior: `framer-motion`
-- Markdown rendering: `react-markdown`, `remark-gfm`
-- Date utilities: `date-fns`
-- Calendar UI: `@fullcalendar/react`, `@fullcalendar/core`, `@fullcalendar/daygrid`
-- Transport: Server runtime API routes + SSE endpoints
-
-### Agent Service (`agent_service/`)
-
-- Framework: FastAPI + Uvicorn
-- Schema validation: Pydantic
-- LLM orchestration: LangChain + `langchain-nvidia-ai-endpoints`
-- PDF parsing: PyMuPDF (`pymupdf`)
-- OCR fallback: `pytesseract` + `Pillow` (requires system `tesseract`)
-- Configuration: `python-dotenv`
-
-## Repository Structure
-
-```text
-.
-|-- extension/                # Chrome MV3 extension
-|   |-- src/
-|   |   |-- background/       # Message routing and run workflow
-|   |   |-- content/          # Page detection, extractors, widget injection
-|   |   |-- clients/          # Web app HTTP client
-|   |   |-- storage/          # chrome.storage access
-|   |   |-- shared/           # Contracts, constants, logger
-|   |   `-- popup/
-|   `-- tests/                # Jest unit tests
-|-- webapp/                   # Next.js dashboard + API routes
-|   |-- src/
-|   |   |-- app/
-|   |   |   |-- api/          # ingest, chat-session, integrations, calendar routes
-|   |   |   `-- dashboard/    # Dashboard pages, chat UI, and calendar planner view
-|   |   `-- lib/              # Google/calendar integration and planner logic
-|   `-- supabase/
-|       `-- migrations/       # Supabase SQL migrations
-|-- agent_service/            # FastAPI AI orchestration service
-|   `-- app/
-|       |-- api/v1/routes/    # health and runs endpoints
-|       |-- services/         # run workflow + PDF extraction
-|       |-- orchestrators/    # prompt and output orchestration
-|       |-- clients/          # LLM provider client wrappers
-|       `-- schemas/          # Request/response contracts
-|-- internal/architecture/    # System contracts and boundaries
-`-- docs/                     # Architecture and flow diagrams
-```
-
-## API Surface
-
-### Web App API
-
-- `POST /api/ingest-assignment`
-- `POST /api/chat-session`
-- `GET /api/chat-session/:sessionId`
-- `GET /api/chat-session/:sessionId/events` (SSE)
-- `POST /api/run-agent` (legacy proxy path)
-- `GET /api/integrations/google-calendar`
-- `GET /api/integrations/google-calendar/connect`
-- `GET /api/integrations/google-calendar/callback`
-- `POST /api/integrations/google-calendar/disconnect`
-- `POST /api/integrations/google-calendar/events`
-- `GET /api/calendar/month`
-- `POST /api/calendar/proposals/generate`
-
-### Agent Service API
-
-- `GET /api/v1/health`
-- `POST /api/v1/runs`
-- `POST /api/v1/runs/stream` (SSE)
-- `GET /health` (legacy)
-- `POST /run-agent` (legacy)
-- `POST /run-agent/stream` (legacy SSE)
-
-## Local Development
-
-### Prerequisites
-
-- Node.js 18+
-- Python 3.10+ recommended
-- Chrome browser
-- (Optional) system `tesseract` binary for OCR fallback in `agent_service`
-
-### 1. Agent Service
+### 1) Start the agent service
 
 ```bash
 cd agent_service
@@ -197,7 +44,7 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
-### 2. Web App
+### 2) Start the web app
 
 ```bash
 cd webapp
@@ -205,9 +52,9 @@ npm install
 npm run dev
 ```
 
-Runs on `http://localhost:3000`.
+The dashboard runs at `http://localhost:3000`.
 
-### 3. Extension
+### 3) Build and load the extension
 
 ```bash
 cd extension
@@ -215,72 +62,21 @@ npm install
 npm run build
 ```
 
-Then load unpacked extension in Chrome from the `extension/` directory.
+Then load the unpacked extension in Chrome from the `extension/` folder.
 
-## Testing and Quality Checks
+## Project layout (simple view)
 
-### Extension
+- `extension/` is the Canvas-side browser extension.
+- `webapp/` is the dashboard and API layer.
+- `agent_service/` is the AI orchestration service.
+- `docs/` and `internal/architecture/` hold deeper design references.
 
-```bash
-cd extension
-npm test
-npm run build
-```
+## If you want deeper technical detail
 
-### Web App
+For architecture-level docs:
 
-```bash
-cd webapp
-npm run lint
-npm run build
-```
-
-### Agent Service
-
-```bash
-cd agent_service
-python -m pytest
-```
-
-## Environment Variables
-
-### `webapp/.env.local`
-
-- `AGENT_SERVICE_URL`
-  Example: `http://localhost:8000`
-- `GOOGLE_OAUTH_CLIENT_ID`
-- `GOOGLE_OAUTH_CLIENT_SECRET`
-- `GOOGLE_OAUTH_REDIRECT_URI`
-  Example: `http://localhost:3000/api/integrations/google-calendar/callback`
-- `GOOGLE_OAUTH_SCOPES`
-  Example: `https://www.googleapis.com/auth/calendar.events openid email`
-  Notes: default scopes include `calendar.events`, `openid`, and `email`; `openid` and `email` are optional if you only need calendar access.
-
-### `agent_service/.env`
-
-- `NVIDIA_API_KEY` (required for LLM calls)
-- `ENABLE_VISUAL_SIGNALS` (optional feature flag, defaults enabled)
-
-## Database Migrations
-
-- Local planner persistence table `public.assignment_work_blocks` has been removed.
-- Historical create migration: `webapp/supabase/migrations/20260325_calendar_work_blocks.sql`
-- Removal migration: `webapp/supabase/migrations/20260326_drop_assignment_work_blocks.sql`
-
-## Current State and Direction
-
-### Current
-
-- Working local 3-app pipeline from Canvas extraction to streamed guide generation in dashboard chat.
-- Extension-to-dashboard handoff is implemented and functional.
-- Agent service supports both sync and stream workflows with typed stage events.
-- Dashboard includes live chat, Google Calendar integration, and a monthly planner view with Google-backed study time blocks.
-
-### Direction
-
-- Add durable persistence for assignments, sessions, and generated guides.
-- Add authentication/authorization and production-grade security constraints.
-- Stabilize and version contracts across all components.
-- Expand automated contract/integration/e2e coverage across extension, web app, and agent service.
-
+- `extension/ARCHITECTURE.md`
+- `webapp/ARCHITECTURE.md`
+- `agent_service/ARCHITECTURE.md`
+- `internal/architecture/*`
 

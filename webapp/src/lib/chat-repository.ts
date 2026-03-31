@@ -875,6 +875,36 @@ export async function createPersistedChatSession(input: {
   };
 }
 
+export async function createChatSessionFromExistingSnapshot(input: {
+  userId: string;
+  snapshotId: string;
+  title: string;
+}): Promise<{ sessionId: string; assignmentUuid: string }> {
+  const assignmentUuid = crypto.randomUUID();
+
+  await insertSingle<DbAssignmentIngest>({
+    table: "assignment_ingests",
+    row: {
+      assignment_uuid: assignmentUuid,
+      assignment_snapshot_id: input.snapshotId,
+      request_id: null,
+    },
+  });
+
+  const session = await insertSingle<DbChatSession>({
+    table: "chat_sessions",
+    row: {
+      user_id: input.userId,
+      assignment_uuid: assignmentUuid,
+      title: input.title,
+      status: "completed",
+      updated_at: nowIso(),
+    },
+  });
+
+  return { sessionId: session.id, assignmentUuid };
+}
+
 export async function getPersistedSessionSnapshot(
   sessionId: string,
 ): Promise<PersistedSessionSnapshot | null> {
@@ -1944,6 +1974,7 @@ export type AssignmentDetailResult = {
   snapshotPointsPossible: number | null;
   snapshotSubmissionType: string | null;
   latestAssignmentUuid: string | null;
+  latestSnapshotId: string | null;
   sessions: AssignmentDetailSession[];
   latestSessionId: string | null;
 };
@@ -2102,6 +2133,7 @@ export async function getAssignmentDetailForUser(input: {
     snapshotPointsPossible: typeof latestSnapshot.points_possible === "number" ? latestSnapshot.points_possible : null,
     snapshotSubmissionType: toOptionalString(latestSnapshot.submission_type) ?? null,
     latestAssignmentUuid,
+    latestSnapshotId: latestSnapshot.id,
     sessions,
     latestSessionId: latestSession?.id ?? null,
   };
