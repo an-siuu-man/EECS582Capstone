@@ -62,7 +62,7 @@
 
 :root {
   --radius: 0.625rem;
-  --font-sans-stack: "SF Pro Text", "SF Pro Display", ".SFNSText", ".SFNSDisplay",
+  --font-sans-stack: "-apple-system", "SF Pro Text", "SF Pro Display", ".SFNSText", ".SFNSDisplay",
     ".AppleSystemUIFont", "Nunito Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
   --font-mono-stack: "SF Mono", "SFMono-Regular", Menlo, Monaco, Consolas,
     "IBM Plex Mono", "Liberation Mono", "Courier New", monospace;
@@ -220,6 +220,30 @@
 @media (prefers-reduced-motion: reduce) {
   .thinking-shine-overlay {
     animation: none;
+  }
+}
+
+@keyframes streaming-cursor-blink {
+  0%, 100% {
+    opacity: 0.7;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+.streaming-cursor {
+  animation: streaming-cursor-blink 0.7s step-end infinite;
+  font-size: 0.9em;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  line-height: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .streaming-cursor {
+    animation: none;
+    opacity: 0.5;
   }
 }
 

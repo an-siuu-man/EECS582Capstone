@@ -147,7 +147,7 @@ export function ChatInputBar({
           <p className="px-3 pt-1 text-[12px] text-destructive">{fileError}</p>
         ) : null}
 
-        <div className="flex items-end gap-2 px-2 py-2">
+        <div className="flex items-center gap-2 px-2 py-2">
           <input
             ref={fileInputRef}
             type="file"

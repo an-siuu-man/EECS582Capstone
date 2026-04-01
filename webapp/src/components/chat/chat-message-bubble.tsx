@@ -1,6 +1,6 @@
 "use client"
 
-import { memo, useMemo } from "react"
+import { memo, useDeferredValue, useMemo } from "react"
 import { format, isSameDay } from "date-fns"
 import { motion } from "framer-motion"
 import { FileText } from "lucide-react"
@@ -83,6 +83,11 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
   }, [message.metadata, message.sender_role])
 
   const assistantVisibleText = assistantThinkState?.visibleMarkdown.trim() || ""
+  const deferredAssistantText = useDeferredValue(assistantVisibleText)
+  const streamingTail =
+    isLatestStreamingAssistant && deferredAssistantText !== assistantVisibleText
+      ? assistantVisibleText.slice(deferredAssistantText.length)
+      : ""
   const assistantThinkingCount = Math.max(
     assistantThinkState?.thinkBlockCount ?? 0,
     assistantThinkState?.isThinking ? 1 : 0,
@@ -100,8 +105,8 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
       transition={reduceMotion ? undefined : { duration: 0.24, ease: EASE_OUT }}
       className={
         message.sender_role === "user"
-          ? "ml-auto w-fit max-w-[85%] break-words rounded-2xl border border-zinc-500/70 bg-zinc-700/85 px-3 py-2 text-left text-[15px] text-zinc-50 shadow-sm sm:max-w-[75%] lg:max-w-[65%]"
-          : "mx-auto w-full max-w-4xl px-1 py-1 text-left text-[15px]"
+          ? "ml-auto w-fit max-w-[85%] break-words rounded-2xl border border-zinc-500/70 bg-zinc-700/85 px-3 py-2 text-left text-[15px] text-zinc-50 shadow-sm sm:max-w-[75%] lg:max-w-[65%] [contain-intrinsic-size:auto_80px] [content-visibility:auto]"
+          : "mx-auto w-full max-w-4xl px-1 py-1 text-left text-[15px] [contain-intrinsic-size:auto_200px] [content-visibility:auto]"
       }
     >
       {message.sender_role === "assistant" ? (
@@ -115,10 +120,16 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
               ))
             : null}
           {assistantVisibleText ? (
-            <div className="min-w-0 font-body [&_a]:font-medium [&_a]:text-blue-600 [&_a]:underline [&_code]:font-code [&_code]:break-words [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_hr]:my-6 [&_li]:break-words [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_p]:break-words [&_p]:font-light [&_pre]:font-code [&_pre]:my-3 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_table]:w-full [&_table]:min-w-[28rem] [&_table]:border-separate [&_table]:border-spacing-0 [&_table]:rounded-md [&_table]:border [&_table]:border-border/70 [&_thead]:bg-muted/45 [&_th]:border-b [&_th]:border-border/70 [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:text-[13px] [&_th]:font-semibold [&_td]:border-b [&_td]:border-border/50 [&_td]:px-2 [&_td]:py-1.5 [&_td]:text-[13px] [&_tbody_tr:last-child_td]:border-b-0 [&_tbody_tr:nth-child(even)]:bg-muted/25 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5">
+            <div className="min-w-0 font-body [&_a]:font-medium [&_a]:text-blue-600 [&_a]:underline [&_code]:font-code [&_code]:text-[14px] [&_code]:break-words [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_hr]:my-6 [&_li]:break-words [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_p]:break-words [&_p]:font-light [&_pre]:font-code [&_pre]:text-[14px] [&_pre]:my-3 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_table]:w-full [&_table]:min-w-[28rem] [&_table]:border-separate [&_table]:border-spacing-0 [&_table]:rounded-md [&_table]:border [&_table]:border-border/70 [&_thead]:bg-muted/45 [&_th]:border-b [&_th]:border-border/70 [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:text-[13px] [&_th]:font-semibold [&_td]:border-b [&_td]:border-border/50 [&_td]:px-2 [&_td]:py-1.5 [&_td]:text-[13px] [&_tbody_tr:last-child_td]:border-b-0 [&_tbody_tr:nth-child(even)]:bg-muted/25 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5">
               <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS} components={MARKDOWN_COMPONENTS}>
-                {assistantVisibleText}
+                {deferredAssistantText}
               </ReactMarkdown>
+              {streamingTail ? (
+                <span className="whitespace-pre-wrap font-light">{streamingTail}</span>
+              ) : null}
+              {isLatestStreamingAssistant ? (
+                <span aria-hidden="true" className="streaming-cursor">▮</span>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -138,7 +149,7 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
             </div>
           )}
           {message.content_text ? (
-            <div className="min-w-0 font-body [&_a]:font-medium [&_a]:text-blue-400 [&_a]:underline [&_code]:font-code [&_code]:break-words [&_code]:rounded [&_code]:bg-zinc-600 [&_code]:px-1 [&_hr]:my-6 [&_li]:break-words [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_p]:break-words [&_pre]:font-code [&_pre]:my-3 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-zinc-800 [&_pre]:p-3 [&_table]:w-full [&_table]:min-w-[28rem] [&_table]:border-separate [&_table]:border-spacing-0 [&_table]:rounded-md [&_table]:border [&_table]:border-zinc-500/70 [&_thead]:bg-zinc-600/45 [&_th]:border-b [&_th]:border-zinc-500/70 [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:text-[13px] [&_th]:font-semibold [&_td]:border-b [&_td]:border-zinc-500/50 [&_td]:px-2 [&_td]:py-1.5 [&_td]:text-[13px] [&_tbody_tr:last-child_td]:border-b-0 [&_tbody_tr:nth-child(even)]:bg-zinc-600/25 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5">
+            <div className="min-w-0 font-body [&_a]:font-medium [&_a]:text-blue-400 [&_a]:underline [&_code]:font-code [&_code]:text-[14px] [&_code]:break-words [&_code]:rounded [&_code]:bg-zinc-600 [&_code]:px-1 [&_hr]:my-6 [&_li]:break-words [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_p]:break-words [&_pre]:font-code [&_pre]:text-[14px] [&_pre]:my-3 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-zinc-800 [&_pre]:p-3 [&_table]:w-full [&_table]:min-w-[28rem] [&_table]:border-separate [&_table]:border-spacing-0 [&_table]:rounded-md [&_table]:border [&_table]:border-zinc-500/70 [&_thead]:bg-zinc-600/45 [&_th]:border-b [&_th]:border-zinc-500/70 [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:text-[13px] [&_th]:font-semibold [&_td]:border-b [&_td]:border-zinc-500/50 [&_td]:px-2 [&_td]:py-1.5 [&_td]:text-[13px] [&_tbody_tr:last-child_td]:border-b-0 [&_tbody_tr:nth-child(even)]:bg-zinc-600/25 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5">
               <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS} components={MARKDOWN_COMPONENTS}>
                 {message.content_text}
               </ReactMarkdown>

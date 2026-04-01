@@ -92,6 +92,10 @@ function DashboardChatPageContent() {
   const latestAssistantMessageIdRef = useRef<string | null>(null)
   const previousGuideLengthRef = useRef(0)
   const lastScrollTimeRef = useRef(0)
+  const pendingDeltasRef = useRef<
+    Array<{ message_id: string; delta?: string; content?: string; shouldAutoScroll: boolean }>
+  >([])
+  const rafIdRef = useRef<number | null>(null)
   const reduceMotion = useReducedMotion()
 
   function getThreadViewport() {
@@ -270,22 +274,37 @@ function DashboardChatPageContent() {
           content?: string
         }
         if (!payload.message_id) return
-        const messageId = payload.message_id
-        const shouldAutoScroll = isNearBottom()
 
-        setSession((previous) => {
-          if (!previous || previous.session_id !== sessionId) return previous
-          const next = patchSessionMessageContent(previous, messageId, (previousText) => {
-            if (typeof payload.content === "string") {
-              return payload.content
-            }
-            return `${previousText}${payload.delta ?? ""}`
-          })
-          latestSessionRef.current = next
-          return next
+        pendingDeltasRef.current.push({
+          message_id: payload.message_id,
+          delta: payload.delta,
+          content: payload.content,
+          shouldAutoScroll: isNearBottom(),
         })
-        if (shouldAutoScroll) {
-          throttledScrollToBottom()
+
+        if (rafIdRef.current === null) {
+          rafIdRef.current = requestAnimationFrame(() => {
+            rafIdRef.current = null
+            if (isDisposed) return
+            const batch = pendingDeltasRef.current.splice(0)
+            if (batch.length === 0) return
+
+            let batchShouldScroll = false
+            setSession((previous) => {
+              if (!previous || previous.session_id !== sessionId) return previous
+              let next = previous
+              for (const item of batch) {
+                if (item.shouldAutoScroll) batchShouldScroll = true
+                next = patchSessionMessageContent(next, item.message_id, (previousText) => {
+                  if (typeof item.content === "string") return item.content
+                  return `${previousText}${item.delta ?? ""}`
+                })
+              }
+              latestSessionRef.current = next
+              return next
+            })
+            if (batchShouldScroll) throttledScrollToBottom()
+          })
         }
       } catch {
         setErrorText("Unable to parse chat delta event.")
@@ -377,6 +396,10 @@ function DashboardChatPageContent() {
     return () => {
       isDisposed = true
       eventSource.close()
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current)
+        rafIdRef.current = null
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId])
