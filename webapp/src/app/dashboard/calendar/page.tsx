@@ -89,6 +89,7 @@ export default function DashboardCalendarPage() {
   const [showAssignmentDue, setShowAssignmentDue] = useState(true)
   const [showGoogleEvents, setShowGoogleEvents] = useState(true)
   const [showStudyBlocks, setShowStudyBlocks] = useState(true)
+  const [visibleMonthLabel, setVisibleMonthLabel] = useState("")
   const [panelAssignment, setPanelAssignment] = useState<{
     assignmentId: string
     title: string
@@ -165,11 +166,16 @@ export default function DashboardCalendarPage() {
     [events],
   )
 
+  const enabledSourceCount = useMemo(() => {
+    return [showAssignmentDue, showStudyBlocks, showGoogleEvents].filter(Boolean).length
+  }, [showAssignmentDue, showGoogleEvents, showStudyBlocks])
+
   const onDatesSet = useCallback((arg: DatesSetArg) => {
     setRange({
       startISO: arg.start.toISOString(),
       endISO: arg.end.toISOString(),
     })
+    setVisibleMonthLabel(arg.view.title)
   }, [])
 
   const onEventClick = useCallback(
@@ -209,17 +215,50 @@ export default function DashboardCalendarPage() {
     >
       <motion.div
         variants={reduceMotion ? undefined : pageSection}
-        className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"
+        className="rounded-2xl border border-border/60 bg-gradient-to-br from-card/95 via-card/85 to-muted/40 p-4 shadow-[0_22px_44px_-32px_rgba(15,23,42,0.7)] backdrop-blur-sm sm:p-5"
       >
-        <div>
-          <h2 className="text-3xl font-heading font-bold tracking-tight">Calendar Planner</h2>
-          <p className="text-muted-foreground">
-            Monthly view of assignment deadlines and Google Calendar events.
-          </p>
-        </div>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground/85">
+              Study Schedule
+            </p>
+            <h2 className="text-3xl font-heading font-bold tracking-tight">Calendar Planner</h2>
+            <p className="text-muted-foreground">
+              Read deadlines at a glance, focus by source, and open assignments straight from the
+              calendar.
+            </p>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <GoogleStatusBadge status={googleStatus} />
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Badge
+                variant="outline"
+                className="border-border/60 bg-background/70 px-2.5 py-1 text-xs font-medium"
+              >
+                {visibleMonthLabel || "Current Month"}
+              </Badge>
+              <Badge
+                variant="outline"
+                className="border-border/60 bg-background/70 px-2.5 py-1 text-xs font-medium"
+              >
+                {fullCalendarEvents.length} visible of {events.length} events
+              </Badge>
+              <Badge
+                variant="outline"
+                className="border-border/60 bg-background/70 px-2.5 py-1 text-xs font-medium"
+              >
+                {timezone}
+              </Badge>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+            <GoogleStatusBadge status={googleStatus} />
+            <Badge
+              variant="outline"
+              className="border-border/60 bg-background/70 px-2.5 py-1 text-xs font-medium"
+            >
+              {enabledSourceCount} filter{enabledSourceCount === 1 ? "" : "s"} active
+            </Badge>
+          </div>
         </div>
       </motion.div>
 
@@ -255,14 +294,31 @@ export default function DashboardCalendarPage() {
             />
           )}
         </AnimatePresence>
-        <Card className="border-border/60 bg-card/90 shadow-[0_14px_36px_-24px_rgba(15,23,42,0.5)]">
+        <Card className="headstart-calendar-shell overflow-hidden border-border/60 bg-card/90 shadow-[0_20px_42px_-28px_rgba(15,23,42,0.62)]">
           <CardHeader>
-            <CardTitle>Monthly Calendar</CardTitle>
+            <CardTitle>{visibleMonthLabel || "Monthly Calendar"}</CardTitle>
             <CardDescription>
-              Toggle each source to focus on assignment deadlines, study blocks, or other Google
-              Calendar events.
+              Filter event sources to declutter the month view and focus on what needs attention.
             </CardDescription>
-            <div className="flex flex-wrap items-center gap-2 pt-1">
+            <div className="mt-1 grid gap-2 sm:grid-cols-3">
+              <CalendarSourceStat
+                label="Assignment Due"
+                count={sourceCounts.assignmentDue}
+                toneClass="border-red-300/55 bg-red-100/70 text-red-700 dark:border-red-500/35 dark:bg-red-500/14 dark:text-red-200"
+              />
+              <CalendarSourceStat
+                label="Study Blocks"
+                count={sourceCounts.studyBlocks}
+                toneClass="border-blue-300/55 bg-blue-100/70 text-blue-700 dark:border-blue-500/35 dark:bg-blue-500/14 dark:text-blue-200"
+              />
+              <CalendarSourceStat
+                label="Google Events"
+                count={sourceCounts.googleEvents}
+                toneClass="border-teal-300/55 bg-teal-100/70 text-teal-700 dark:border-teal-500/35 dark:bg-teal-500/14 dark:text-teal-200"
+              />
+            </div>
+            <div className="rounded-xl border border-border/65 bg-background/65 p-2">
+              <div className="flex flex-wrap items-center gap-2">
               <SourceToggle
                 label="Assignment Due"
                 count={sourceCounts.assignmentDue}
@@ -287,11 +343,13 @@ export default function DashboardCalendarPage() {
                 dotClass="bg-teal-500"
                 icon={CalendarCheck}
               />
+              </div>
             </div>
           </CardHeader>
           <CardContent>
-            <div className="relative rounded-xl border border-border/70 bg-background/70 p-3">
+            <div className="headstart-calendar-shell__frame relative rounded-2xl border border-border/70 bg-background/80 p-2.5 sm:p-3">
               <FullCalendar
+                className="headstart-calendar-shell__calendar"
                 plugins={[dayGridPlugin]}
                 initialView="dayGridMonth"
                 height="auto"
@@ -300,7 +358,8 @@ export default function DashboardCalendarPage() {
                   center: "title",
                   right: "",
                 }}
-                dayMaxEventRows={4}
+                fixedWeekCount={false}
+                dayMaxEventRows={3}
                 events={fullCalendarEvents}
                 eventClick={onEventClick}
                 datesSet={onDatesSet}
@@ -314,10 +373,12 @@ export default function DashboardCalendarPage() {
                     animate={reduceMotion ? undefined : { opacity: 1 }}
                     exit={reduceMotion ? undefined : { opacity: 0 }}
                     transition={{ duration: 0.18 }}
-                    className="pointer-events-none absolute inset-x-3 bottom-3 flex items-center gap-2 text-sm text-muted-foreground"
+                    className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center"
                   >
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    Loading calendar...
+                    <div className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-background/90 px-3 py-1.5 text-sm text-muted-foreground shadow-[0_18px_30px_-24px_rgba(15,23,42,0.8)] backdrop-blur-sm">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Loading calendar...
+                    </div>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -348,11 +409,12 @@ function SourceToggle({
     <button
       type="button"
       onClick={onToggle}
+      aria-pressed={active}
       className={cn(
-        "inline-flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-medium",
+        "inline-flex min-h-9 cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors",
         active
-          ? "border-border/80 bg-card text-card-foreground shadow-sm hover:bg-muted/60"
-          : "border-border/40 bg-transparent text-muted-foreground/60 hover:border-border/60 hover:text-muted-foreground",
+          ? "border-border/80 bg-card text-card-foreground shadow-[0_10px_20px_-16px_rgba(15,23,42,0.75)] hover:bg-muted/55"
+          : "border-border/45 bg-background/40 text-muted-foreground/70 hover:border-border/70 hover:bg-background/70 hover:text-foreground/85",
       )}
     >
       <span
@@ -362,8 +424,10 @@ function SourceToggle({
       <span>{label}</span>
       <span
         className={cn(
-          "ml-0.5 rounded-full px-1.5 py-0.5 text-xs tabular-nums leading-none",
-          active ? "bg-muted text-muted-foreground" : "text-muted-foreground/50",
+          "ml-0.5 rounded-full border px-1.5 py-0.5 text-xs tabular-nums leading-none",
+          active
+            ? "border-border/70 bg-muted/70 text-muted-foreground"
+            : "border-transparent bg-transparent text-muted-foreground/55",
         )}
       >
         {count}
@@ -386,6 +450,28 @@ function GoogleStatusBadge({ status }: { status: GoogleIntegrationStatus }) {
       <Icon className="h-3 w-3 shrink-0" />
       Google: {googleStatusLabel(status)}
     </Badge>
+  )
+}
+
+function CalendarSourceStat({
+  label,
+  count,
+  toneClass,
+}: {
+  label: string
+  count: number
+  toneClass: string
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-lg border px-3 py-2 text-sm shadow-[0_10px_20px_-18px_rgba(15,23,42,0.75)]",
+        toneClass,
+      )}
+    >
+      <p className="text-[11px] font-semibold uppercase tracking-[0.08em] opacity-90">{label}</p>
+      <p className="mt-0.5 text-base font-semibold tabular-nums">{count}</p>
+    </div>
   )
 }
 
