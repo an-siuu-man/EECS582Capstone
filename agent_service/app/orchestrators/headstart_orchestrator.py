@@ -652,6 +652,15 @@ say so explicitly rather than guessing.
 - If the student asks you to "just give the answer", "write it for me", or similar, decline
   politely and redirect them toward understanding the problem themselves.
 
+## Retrieved Context Snippets
+The `Retrieved context snippets` section contains passages retrieved by relevance from three
+sources: the assignment PDF ("Assignment PDF"), the generated study guide ("Study Guide"), and
+the assignment metadata ("Assignment Metadata"). Each entry shows its source label, chunk ID,
+and relevance score. When a student asks about specific assignment content (e.g., "what does
+question 3 say?", "what are the submission requirements?"), prioritize these retrieved snippets —
+they are the most targeted excerpts for the current query. When the "Attached files" section is
+empty, assignment PDF content has been fully routed to the retrieved context snippets above.
+
 ## Attached File Format
 Attached files arrive in structured blocks:
   <attachment name="filename.pdf" source="assignment|user_upload">
@@ -755,10 +764,10 @@ Calendar context (free slots):
 MAX_CHAT_PAYLOAD_CHARS = 12000
 MAX_CHAT_GUIDE_CHARS = 32000
 MAX_CHAT_HISTORY_CHARS = 12000
-MAX_CHAT_RETRIEVAL_CHARS = 12000
+MAX_CHAT_RETRIEVAL_CHARS = 20000
 MAX_CHAT_USER_MESSAGE_CHARS = 4000
 MAX_CHAT_CALENDAR_CHARS = 4000
-MAX_CHAT_ASSIGNMENT_PDF_CHARS = 32000
+MAX_CHAT_ASSIGNMENT_PDF_CHARS = 6000
 MAX_CHAT_USER_ATTACHMENTS_CHARS = 24000
 MAX_CHAT_FIELD_CHARS = 2200
 MAX_CHAT_ARRAY_ITEMS = 20
@@ -855,6 +864,13 @@ def _format_chat_history_for_prompt(chat_history: Optional[list[dict]]) -> str:
     return "\n".join(lines) if lines else "(none)"
 
 
+_RETRIEVAL_SOURCE_LABELS: dict[str, str] = {
+    "guide_markdown": "Study Guide",
+    "assignment_payload": "Assignment Metadata",
+    "assignment_pdf": "Assignment PDF",
+}
+
+
 def _format_retrieval_context_for_prompt(retrieval_context: Optional[list[dict]]) -> str:
     if not retrieval_context:
         return "(none)"
@@ -871,10 +887,10 @@ def _format_retrieval_context_for_prompt(retrieval_context: Optional[list[dict]]
 
         chunk_id = str(item.get("chunk_id", "?"))
         source = str(item.get("source", "unknown"))
-        score = item.get("score", "?")
-        lines.append(
-            f"- [{source} | {chunk_id} | score={score}] {text}"
-        )
+        source_label = _RETRIEVAL_SOURCE_LABELS.get(source, source)
+        score = item.get("score")
+        score_str = f"{score:.3f}" if isinstance(score, float) else str(score)
+        lines.append(f"- [{source_label} | {chunk_id} | score={score_str}] {text}")
 
     return "\n".join(lines) if lines else "(none)"
 
@@ -1034,10 +1050,13 @@ def stream_headstart_chat_answer(
 
     calendar_context_str = _format_calendar_context_for_prompt(calendar_context)
 
-    assignment_pdf_str = _truncate_for_chat(
-        assignment_pdf_text or "(no assignment files)",
-        MAX_CHAT_ASSIGNMENT_PDF_CHARS,
-    )
+    raw_pdf = (assignment_pdf_text or "").strip()
+    if raw_pdf:
+        assignment_pdf_str = _truncate_for_chat(raw_pdf, MAX_CHAT_ASSIGNMENT_PDF_CHARS)
+    else:
+        assignment_pdf_str = (
+            "(assignment PDF content is available via the retrieved context snippets above)"
+        )
 
     user_attachments_str = _truncate_for_chat(
         user_attachments_context or "(no user-attached files)",

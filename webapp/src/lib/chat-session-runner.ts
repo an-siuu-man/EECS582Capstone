@@ -528,14 +528,6 @@ async function runFollowupChat(input: {
       throw new Error("Session context not found.");
     }
 
-    const retrievalContext = retrieveLexicalContext({
-      guideMarkdown: sessionContext.guideMarkdown,
-      payload: sessionContext.payload,
-      query: userMessageContent,
-      maxChunks: 6,
-      maxChars: 700,
-    });
-
     const agentUrl = process.env.AGENT_SERVICE_URL;
     if (!agentUrl) {
       throw new Error("AGENT_SERVICE_URL not set");
@@ -605,6 +597,21 @@ async function runFollowupChat(input: {
       sessionContext.assignmentUuid,
     );
 
+    // PDFs longer than this threshold are handled via retrieval chunks rather than a full blob.
+    // Short PDFs are passed directly so the agent has the full context without chunking.
+    const PDF_FULL_BLOB_THRESHOLD_CHARS = 4000;
+    const pdfText = storedAssignmentPdfText || "";
+    const pdfIsLong = pdfText.length > PDF_FULL_BLOB_THRESHOLD_CHARS;
+
+    const retrievalContext = retrieveLexicalContext({
+      guideMarkdown: sessionContext.guideMarkdown,
+      payload: sessionContext.payload,
+      query: userMessageContent,
+      assignmentPdfText: pdfIsLong ? pdfText : undefined,
+      maxChunks: pdfIsLong ? 10 : 6,
+      maxChars: 700,
+    });
+
     let snapshotPdfFilesForFallback: Array<{
       filename: string;
       storage_url: string;
@@ -625,7 +632,7 @@ async function runFollowupChat(input: {
       agentUrl,
       JSON.stringify({
         assignment_payload: assignmentPayload,
-        assignment_pdf_text: storedAssignmentPdfText || "",
+        assignment_pdf_text: pdfIsLong ? "" : pdfText,
         guide_markdown: sessionContext.guideMarkdown,
         chat_history: chatHistory,
         retrieval_context: retrievalContext,

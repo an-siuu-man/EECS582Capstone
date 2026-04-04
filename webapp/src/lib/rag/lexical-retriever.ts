@@ -2,7 +2,7 @@ import { type AssignmentPayload } from "@/lib/chat-types";
 
 export type RetrievalChunk = {
   chunk_id: string;
-  source: "guide_markdown" | "assignment_payload";
+  source: "guide_markdown" | "assignment_payload" | "assignment_pdf";
   text: string;
   score: number;
 };
@@ -157,10 +157,19 @@ function computeScores(chunks: RetrievalChunk[], query: string) {
   });
 }
 
+const PDF_CHUNK_CHARS = 900;
+const PDF_OVERLAP_CHARS = 100;
+
+// Per-source slot caps: prevent PDF chunks from crowding out guide/payload context.
+const PDF_SLOTS = 4;
+const GUIDE_SLOTS = 2;
+const PAYLOAD_SLOTS = 1;
+
 export function retrieveLexicalContext(input: {
   guideMarkdown: string;
   payload: AssignmentPayload;
   query: string;
+  assignmentPdfText?: string;
   maxChunks?: number;
   maxChars?: number;
 }) {
@@ -173,6 +182,9 @@ export function retrieveLexicalContext(input: {
   const corpus = [
     ...chunkText("guide_markdown", input.guideMarkdown || "", maxChars, overlapChars),
     ...chunkText("assignment_payload", payloadSummary, maxChars, overlapChars),
+    ...(input.assignmentPdfText && input.assignmentPdfText.length > 1000
+      ? chunkText("assignment_pdf", input.assignmentPdfText, PDF_CHUNK_CHARS, PDF_OVERLAP_CHARS)
+      : []),
   ];
 
   if (corpus.length === 0) return [] as RetrievalChunk[];
@@ -182,7 +194,17 @@ export function retrieveLexicalContext(input: {
     .sort((a, b) => b.score - a.score || a.chunk_id.localeCompare(b.chunk_id));
 
   if (scored.length > 0) {
-    return scored.slice(0, maxChunks);
+    // Apply per-source slot reservation so PDF chunks can't crowd out guide/payload context.
+    const pdfChunks = scored.filter((c) => c.source === "assignment_pdf").slice(0, PDF_SLOTS);
+    const guideChunks = scored.filter((c) => c.source === "guide_markdown").slice(0, GUIDE_SLOTS);
+    const payloadChunks = scored
+      .filter((c) => c.source === "assignment_payload")
+      .slice(0, PAYLOAD_SLOTS);
+
+    const merged = [...pdfChunks, ...guideChunks, ...payloadChunks]
+      .sort((a, b) => b.score - a.score)
+      .slice(0, maxChunks);
+    return merged;
   }
 
   return corpus.slice(0, Math.min(maxChunks, corpus.length));

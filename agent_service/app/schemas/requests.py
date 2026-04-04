@@ -40,7 +40,7 @@ class ChatHistoryMessage(BaseModel):
 
 class RetrievalChunk(BaseModel):
     chunk_id: str
-    source: str
+    source: Literal["guide_markdown", "assignment_payload", "assignment_pdf"]
     text: str
     score: float = 0.0
 
