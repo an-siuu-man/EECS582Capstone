@@ -1,4 +1,4 @@
-import { Buffer } from "node:buffer";
+﻿import { Buffer } from "node:buffer";
 
 import {
   type AssignmentPayload,
@@ -7,6 +7,7 @@ import {
   type ChatMessageRole,
   type ChatSessionStatus,
   type PdfAttachment,
+  type PdfExtraction,
   type PersistedSessionSnapshot,
 } from "@/lib/chat-types";
 import {
@@ -53,6 +54,7 @@ type DbAssignmentSnapshotFile = {
   file_sha256: string;
   storage_path: string;
   byte_size?: number | null;
+  extracted_text?: string | null;
 };
 
 type DbStoredPdfBlob = {
@@ -688,6 +690,98 @@ export async function listSignedSnapshotPdfFiles(
   );
 }
 
+/**
+ * Persist extracted PDF text for each snapshot file.
+ * Called after initial guide generation with per-file extraction results returned by the agent service.
+ * Idempotent - safe to call multiple times for the same file.
+ */
+export async function persistSnapshotFileExtractions(
+  assignmentUuid: string,
+  entries: Array<{ fileSha256: string; fullText: string }>,
+): Promise<void> {
+  if (entries.length === 0) return;
+
+  const ingest = await getAssignmentIngestByAssignmentUuid(assignmentUuid);
+  if (!ingest) return;
+
+  await Promise.allSettled(
+    entries.map((entry) =>
+      supabaseTableRequest<null>({
+        table: "assignment_snapshot_files",
+        method: "PATCH",
+        query: {
+          assignment_snapshot_id: eq(ingest.assignment_snapshot_id),
+          file_sha256: eq(entry.fileSha256),
+        },
+        headers: { Prefer: "return=minimal" },
+        body: {
+          extracted_text: entry.fullText,
+        },
+      }),
+    ),
+  );
+}
+
+export async function getSnapshotFilesExtractedText(
+  assignmentUuid: string,
+): Promise<string> {
+  const extractions = await getSnapshotFilesExtractedExtractions(assignmentUuid);
+  const parts = extractions
+    .filter((entry) => Boolean(entry.full_text))
+    .map((entry) => {
+      const safeName = entry.filename.replace(/"/g, "'");
+      return `<attachment name="${safeName}" source="assignment">\n${entry.full_text}\n</attachment>`;
+    });
+  return parts.join("\n\n");
+}
+
+export async function getSnapshotFilesExtractedExtractions(
+  assignmentUuid: string,
+): Promise<PdfExtraction[]> {
+  const ingest = await getAssignmentIngestByAssignmentUuid(assignmentUuid);
+  if (!ingest) return [];
+
+  const rows = await selectMany<DbAssignmentSnapshotFile>({
+    table: "assignment_snapshot_files",
+    query: {
+      assignment_snapshot_id: eq(ingest.assignment_snapshot_id),
+      extracted_text: "not.is.null",
+      select: "filename,file_sha256,extracted_text",
+      order: "created_at.asc",
+    },
+  });
+
+  const out: PdfExtraction[] = [];
+  for (const row of rows) {
+    const extractedText = row.extracted_text ?? "";
+    if (!extractedText.trim()) continue;
+    out.push({
+      filename: row.filename,
+      source: "assignment",
+      file_sha256: row.file_sha256,
+      full_text: extractedText,
+      pages: [
+        {
+          page_number: 1,
+          text: extractedText,
+          method: "snapshot-text-cache",
+          blocks: [],
+          confidence: 1,
+        },
+      ],
+      visual_signals: [],
+      quality: {
+        strategy: "snapshot_text_cache",
+        docling_available: false,
+        native_chars: extractedText.length,
+        docling_chars: 0,
+        reconciled_chars: extractedText.length,
+        notes: ["loaded_from_extracted_text"],
+      },
+    });
+  }
+  return out;
+}
 async function deleteStoredBlobIfUnreferenced(input: {
   fileSha256: string;
   storagePathHint?: string;
@@ -2073,7 +2167,7 @@ async function buildGuideSessionInfos(
       countMap.set(row.session_id, { count: 1, latestAt: row.created_at });
     } else {
       existing.count++;
-      existing.latestAt = row.created_at; // asc order → last entry is latest
+      existing.latestAt = row.created_at; // asc order â†’ last entry is latest
     }
   }
 
@@ -2346,3 +2440,4 @@ export async function listResourcesForUser(input: {
     },
   };
 }
+

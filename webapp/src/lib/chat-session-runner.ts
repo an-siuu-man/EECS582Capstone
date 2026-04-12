@@ -12,8 +12,11 @@ import {
 import {
   getHighestMessageIndex,
   getSessionGuideAndRecentHistory,
+  getSnapshotFilesExtractedExtractions,
+  getSnapshotFilesExtractedText,
   insertGuideVersion,
   listSignedSnapshotPdfFiles,
+  persistSnapshotFileExtractions,
   updateChatMessageContent,
   updateChatSessionStatus,
 } from "@/lib/chat-repository";
@@ -309,7 +312,7 @@ async function runInitialGuide(input: {
         ...payloadWithoutPdfs,
         assignment_uuid: assignmentUuid,
       },
-      pdf_text: "",
+      pdf_extractions: [],
       pdf_files: pdfFiles,
     });
 
@@ -384,6 +387,50 @@ async function runInitialGuide(input: {
         }).catch((err: unknown) => {
           console.error("[chat-runner] Failed to persist guide v1:", err);
         });
+
+        // Persist per-file extracted PDF texts so follow-up chat can reuse them
+        // without re-downloading and re-extracting on every message (best-effort).
+        const pdfFileExtractions = Array.isArray(data.pdf_file_extractions)
+          ? data.pdf_file_extractions
+          : [];
+        if (pdfFileExtractions.length > 0) {
+          persistSnapshotFileExtractions(
+            assignmentUuid,
+            (pdfFileExtractions as Array<{
+              file_sha256: string;
+              extraction?: { full_text?: string };
+              full_text?: string;
+            }>)
+              .filter((e) => typeof e.file_sha256 === "string" && e.file_sha256.trim().length > 0)
+              .map((e) => ({
+                fileSha256: e.file_sha256,
+                fullText:
+                  typeof e.extraction?.full_text === "string"
+                    ? e.extraction.full_text
+                    : typeof e.full_text === "string"
+                    ? e.full_text
+                    : "",
+              })),
+          ).catch((err: unknown) => {
+            console.error("[chat-runner] Failed to persist extracted PDF text:", err);
+          });
+        } else {
+          // Legacy fallback for older agent payloads.
+          const pdfFileTexts = Array.isArray(data.pdf_file_texts) ? data.pdf_file_texts : [];
+          if (pdfFileTexts.length > 0) {
+            persistSnapshotFileExtractions(
+              assignmentUuid,
+              (pdfFileTexts as Array<{ file_sha256: string; extracted_text: string }>)
+                .filter((e) => typeof e.file_sha256 === "string" && e.file_sha256.trim().length > 0)
+                .map((e) => ({
+                  fileSha256: e.file_sha256,
+                  fullText: e.extracted_text || "",
+                })),
+            ).catch((err: unknown) => {
+              console.error("[chat-runner] Failed to persist legacy PDF extracted texts:", err);
+            });
+          }
+        }
 
         hasCompleted = true;
         break;
@@ -511,14 +558,6 @@ async function runFollowupChat(input: {
       throw new Error("Session context not found.");
     }
 
-    const retrievalContext = retrieveLexicalContext({
-      guideMarkdown: sessionContext.guideMarkdown,
-      payload: sessionContext.payload,
-      query: userMessageContent,
-      maxChunks: 6,
-      maxChars: 700,
-    });
-
     const agentUrl = process.env.AGENT_SERVICE_URL;
     if (!agentUrl) {
       throw new Error("AGENT_SERVICE_URL not set");
@@ -582,17 +621,59 @@ async function runFollowupChat(input: {
       }
     }
 
+    // Use stored extracted text when available (fast path — no re-download or re-extraction).
+    // Fall back to re-downloading via signed URLs for legacy sessions that predate text storage.
+    const storedAssignmentPdfExtractions = await getSnapshotFilesExtractedExtractions(
+      sessionContext.assignmentUuid,
+    );
+    const storedAssignmentPdfText = await getSnapshotFilesExtractedText(
+      sessionContext.assignmentUuid,
+    );
+
+    // PDFs longer than this threshold are handled via retrieval chunks rather than a full blob.
+    // Short PDFs are passed directly so the agent has the full context without chunking.
+    const PDF_FULL_BLOB_THRESHOLD_CHARS = 4000;
+    const pdfText = storedAssignmentPdfText || "";
+    const pdfIsLong = pdfText.length > PDF_FULL_BLOB_THRESHOLD_CHARS;
+
+    const retrievalContext = retrieveLexicalContext({
+      guideMarkdown: sessionContext.guideMarkdown,
+      payload: sessionContext.payload,
+      query: userMessageContent,
+      assignmentPdfText: pdfIsLong ? pdfText : undefined,
+      maxChunks: pdfIsLong ? 10 : 6,
+      maxChars: 700,
+    });
+
+    let snapshotPdfFilesForFallback: Array<{
+      filename: string;
+      storage_url: string;
+      file_sha256: string;
+    }> = [];
+    if (!storedAssignmentPdfText) {
+      const snapshotPdfFiles = await listSignedSnapshotPdfFiles(sessionContext.assignmentUuid);
+      snapshotPdfFilesForFallback = snapshotPdfFiles.map((f) => ({
+        filename: f.filename,
+        storage_url: f.signedUrl,
+        file_sha256: f.fileSha256,
+      }));
+    }
+
+    const allPdfFiles = [...snapshotPdfFilesForFallback, ...userPdfFiles];
+
     const streamResponse = await openAgentChatStream(
       agentUrl,
       JSON.stringify({
         assignment_payload: assignmentPayload,
+        assignment_pdf_extractions: storedAssignmentPdfExtractions,
+        assignment_pdf_text: pdfIsLong ? "" : pdfText,
         guide_markdown: sessionContext.guideMarkdown,
         chat_history: chatHistory,
         retrieval_context: retrievalContext,
         user_message: userMessageContent,
         thinking_mode: false,
         calendar_context: calendarContext,
-        ...(userPdfFiles.length > 0 ? { user_pdf_files: userPdfFiles } : {}),
+        ...(allPdfFiles.length > 0 ? { user_pdf_files: allPdfFiles } : {}),
       }),
     );
 
