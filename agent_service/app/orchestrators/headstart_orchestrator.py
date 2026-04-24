@@ -5,6 +5,7 @@ Author: Ansuman Sharma
 Created: 2026-02-27
 Revised:
 - 2026-02-27: Moved agent workflow logic into orchestrator module with unchanged runtime behavior. (Ansuman Sharma)
+- 2026-04-24: Switched streaming generation to NVIDIA-hosted GPT-OSS 120B. (Codex)
 Preconditions:
 - NVIDIA_API_KEY is configured in environment.
 - LangChain/NVIDIA dependencies are installed.
@@ -35,13 +36,10 @@ from ..core.logging import get_logger
 from ..schemas.responses import RunAgentResponse
 
 logger = get_logger("headstart.agent")
-MODEL_NAME = "nvidia/nemotron-3-super-120b-a12b"
+MODEL_NAME = "openai/gpt-oss-120b"
 TEMPERATURE = 1
-TOP_P = 0.95
-MAX_OUTPUT_TOKENS = 16384
-REASONING_BUDGET = 16384
-FREQUENCY_PENALTY = 0
-PRESENCE_PENALTY = 0
+TOP_P = 1
+MAX_OUTPUT_TOKENS = 4096
 MAX_RETRIES = 2
 
 SYSTEM_PROMPT = """\
@@ -216,10 +214,7 @@ def _compute_stream_delta(new_text: str, existing_text: str) -> tuple[str, str]:
 
 
 def _request_kwargs() -> dict[str, Any]:
-    return {
-        "frequency_penalty": FREQUENCY_PENALTY,
-        "presence_penalty": PRESENCE_PENALTY,
-    }
+    return {}
 
 
 def _stream_message_deltas(
@@ -227,15 +222,17 @@ def _stream_message_deltas(
     messages: list[BaseMessage],
     include_thinking: bool = False,
 ) -> Iterator[dict[str, str]]:
-    """Yield both answer deltas and reasoning deltas from provider streaming."""
+    """Yield answer deltas, plus reasoning deltas when requested, from provider streaming."""
     seen_content = ""
     seen_reasoning = ""
     for chunk in llm.stream(messages, **_request_kwargs()):
         content_delta, seen_content = _compute_stream_delta(_to_text(chunk), seen_content)
-        reasoning_delta, seen_reasoning = _compute_stream_delta(
-            _extract_reasoning_content(chunk),
-            seen_reasoning,
-        )
+        reasoning_delta = ""
+        if include_thinking:
+            reasoning_delta, seen_reasoning = _compute_stream_delta(
+                _extract_reasoning_content(chunk),
+                seen_reasoning,
+            )
         if content_delta or reasoning_delta:
             yield {
                 "content_delta": content_delta,
@@ -452,7 +449,7 @@ Attached file contents:
 
 def run_headstart_agent(payload: dict, pdf_text: str = "", visual_signals: Optional[list[dict]] = None) -> dict:
     """
-    Run the Headstart AI agent using Nvidia Nemotron via LangChain.
+    Run the Headstart AI agent using NVIDIA-hosted GPT-OSS 120B via LangChain.
 
     Strategy:
       1. Try structured output (with_structured_output) for reliable schema-conforming JSON.
@@ -475,7 +472,6 @@ def run_headstart_agent(payload: dict, pdf_text: str = "", visual_signals: Optio
         temperature=TEMPERATURE,
         max_tokens=MAX_OUTPUT_TOKENS,
         top_p=TOP_P,
-        reasoning_budget=REASONING_BUDGET,
     )
 
     payload_str = json.dumps(payload, ensure_ascii=False)
@@ -542,8 +538,7 @@ def stream_headstart_agent_markdown(
     visual_signals: Optional[list[dict]] = None,
 ) -> Iterator[dict[str, str]]:
     """
-    Stream markdown and reasoning chunks from the model when provider streaming is available.
-    Falls back to a single invoke split into chunks when needed.
+    Stream markdown and reasoning chunks from the provider's long-lived response stream.
     """
     api_key = os.getenv("NVIDIA_API_KEY")
     if not api_key:
@@ -562,7 +557,6 @@ def stream_headstart_agent_markdown(
         temperature=TEMPERATURE,
         max_tokens=MAX_OUTPUT_TOKENS,
         top_p=TOP_P,
-        reasoning_budget=REASONING_BUDGET,
     )
     prompt = _build_markdown_prompt()
 
@@ -577,44 +571,18 @@ def stream_headstart_agent_markdown(
         visual_signals=visual_signals_str,
     )
 
-    has_streamed_content = False
-    try:
-        logger.info(
-            "Streaming markdown response from provider | thinking_mode=%s",
-            THINKING_MODE_ENABLED,
-        )
-        for chunk in _stream_message_deltas(
-            llm,
-            messages,
-            include_thinking=True,
-        ):
-            has_streamed_content = True
-            yield chunk
-    except Exception as exc:
-        logger.warning("Provider streaming failed; falling back to single invoke: %s", repr(exc))
-        has_streamed_content = False
+    logger.info("Streaming markdown response from provider")
+    yielded = False
+    for chunk in _stream_message_deltas(
+        llm,
+        messages,
+        include_thinking=True,
+    ):
+        yielded = True
+        yield chunk
 
-    if has_streamed_content:
-        return
-
-    logger.info("Using single invoke markdown fallback")
-    result = llm.invoke(messages, **_request_kwargs())
-    markdown = _extract_markdown_payload(_to_text(result))
-    reasoning = _extract_reasoning_content(result).strip()
-    if not markdown:
-        raise RuntimeError("Model returned empty markdown output.")
-
-    chunk_size = 900
-    for start in range(0, len(reasoning), chunk_size):
-        yield {
-            "content_delta": "",
-            "reasoning_delta": reasoning[start : start + chunk_size],
-        }
-    for start in range(0, len(markdown), chunk_size):
-        yield {
-            "content_delta": markdown[start : start + chunk_size],
-            "reasoning_delta": "",
-        }
+    if not yielded:
+        raise RuntimeError("Model stream returned no markdown output.")
 
 SYSTEM_PROMPT_CHAT = """\
 ## Role
@@ -1002,8 +970,7 @@ def stream_headstart_chat_answer(
     user_attachments_context: str = "",
 ) -> Iterator[dict[str, str]]:
     """
-    Stream follow-up chat answer and reasoning chunks when provider streaming is available.
-    Falls back to single invoke chunking when needed.
+    Stream follow-up chat answer chunks from the provider's long-lived response stream.
     """
     api_key = os.getenv("NVIDIA_API_KEY")
     if not api_key:
@@ -1022,7 +989,6 @@ def stream_headstart_chat_answer(
         temperature=TEMPERATURE,
         max_tokens=MAX_OUTPUT_TOKENS,
         top_p=TOP_P,
-        reasoning_budget=REASONING_BUDGET,
     )
     prompt = _build_followup_chat_prompt()
 
@@ -1086,45 +1052,19 @@ def stream_headstart_chat_answer(
         user_message=user_message_str,
     )
 
-    has_streamed_content = False
-    try:
-        logger.info(
-            "Streaming follow-up chat response from provider | thinking_mode=%s",
-            include_thinking,
-        )
-        for chunk in _stream_message_deltas(
-            llm,
-            messages,
-            include_thinking=include_thinking,
-        ):
-            has_streamed_content = True
-            yield chunk
-    except Exception as exc:
-        logger.warning(
-            "Provider follow-up chat streaming failed; falling back to single invoke: %s",
-            repr(exc),
-        )
-        has_streamed_content = False
+    logger.info(
+        "Streaming follow-up chat response from provider | thinking_mode=%s",
+        include_thinking,
+    )
+    yielded = False
+    for chunk in _stream_message_deltas(
+        llm,
+        messages,
+        include_thinking=include_thinking,
+    ):
+        yielded = True
+        yield chunk
 
-    if has_streamed_content:
-        return
-
-    logger.info("Using single invoke follow-up chat fallback")
-    result = llm.invoke(messages, **_request_kwargs())
-    content = _extract_markdown_payload(_to_text(result))
-    reasoning = _extract_reasoning_content(result).strip()
-    if not content:
-        raise RuntimeError("Model returned empty follow-up response.")
-
-    chunk_size = 900
-    for start in range(0, len(reasoning), chunk_size):
-        yield {
-            "content_delta": "",
-            "reasoning_delta": reasoning[start : start + chunk_size],
-        }
-    for start in range(0, len(content), chunk_size):
-        yield {
-            "content_delta": content[start : start + chunk_size],
-            "reasoning_delta": "",
-        }
+    if not yielded:
+        raise RuntimeError("Model stream returned no follow-up response.")
 

@@ -100,11 +100,12 @@ Failure path:
 The orchestrator includes a dedicated streaming markdown path:
 
 - Uses a markdown-only prompt for stream mode.
-- Attempts provider streaming first.
-- Falls back to a single invoke and emits chunked slices if provider streaming is unavailable.
+- Uses NVIDIA-hosted `openai/gpt-oss-120b` through LangChain `ChatNVIDIA.stream`.
+- Emits provider content chunks as they arrive instead of buffering a single response object.
+- Streams optional provider reasoning chunks separately when thinking output is enabled.
 - Final output is normalized and validated before `run.completed`.
 
-This preserves resilience while still enabling progressive UI rendering.
+This keeps the dashboard rendering progressively for long-running guide generation.
 
 ## Progress Semantics
 

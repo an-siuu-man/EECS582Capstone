@@ -60,8 +60,6 @@ class TestLlmClient(unittest.TestCase):
                 temperature=0.7,
                 max_tokens=2048,
                 top_p=0.95,
-                reasoning_budget=8192,
-                enable_thinking=True,
             )
 
         kwargs = mock_chat.call_args.kwargs
@@ -71,16 +69,11 @@ class TestLlmClient(unittest.TestCase):
         self.assertEqual(kwargs["temperature"], 0.7)
         self.assertEqual(kwargs["max_completion_tokens"], 2048)
         self.assertEqual(kwargs["top_p"], 0.95)
-        self.assertIn("model_kwargs", kwargs)
-        self.assertEqual(kwargs["model_kwargs"]["reasoning_budget"], 8192)
-        self.assertEqual(
-            kwargs["model_kwargs"]["chat_template_kwargs"],
-            {"enable_thinking": True},
-        )
+        self.assertNotIn("model_kwargs", kwargs)
 
     def test_wraps_duplicate_candidate_error_as_strict_runtime_error(self):
         duplicate_error = (
-            "Multiple candidates for nvidia/nemotron-3-super-120b-a12b "
+            "Multiple candidates for openai/gpt-oss-120b "
             "in `available_models`: [Model(...), Model(...)]"
         )
 

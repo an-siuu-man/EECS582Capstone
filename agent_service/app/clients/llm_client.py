@@ -5,6 +5,7 @@ Author: Ansuman Sharma
 Created: 2026-02-27
 Revised:
 - 2026-02-27: Added dedicated client wrapper for ChatNVIDIA initialization. (Ansuman Sharma)
+- 2026-04-24: Switched hosted NVIDIA model to GPT-OSS 120B for streamed chat completions. (Codex)
 Preconditions:
 - `langchain_nvidia_ai_endpoints` package is installed and credentials are configured externally.
 Inputs:
@@ -23,8 +24,8 @@ import os
 from langchain_nvidia_ai_endpoints import ChatNVIDIA
 from langchain_nvidia_ai_endpoints._statics import MODEL_TABLE, Model, register_model
 
-# Keep guide generation pinned to this exact model.
-STRICT_GUIDE_MODEL_ID = "nvidia/nemotron-3-super-120b-a12b"
+# Keep guide and chat generation pinned to this exact hosted NVIDIA model.
+STRICT_GUIDE_MODEL_ID = "openai/gpt-oss-120b"
 
 # Always route through hosted NVIDIA NIM.
 NVIDIA_NIM_BASE_URL = "https://integrate.api.nvidia.com/v1"
@@ -50,8 +51,6 @@ def _register_strict_guide_model_if_missing(model_name: str) -> None:
             client="ChatNVIDIA",
             endpoint=NVIDIA_CHAT_COMPLETIONS_ENDPOINT,
             supports_thinking=True,
-            thinking_param_enable={"chat_template_kwargs": {"enable_thinking": True}},
-            thinking_param_disable={"chat_template_kwargs": {"enable_thinking": False}},
         )
     )
 
@@ -100,15 +99,13 @@ def build_nvidia_chat_client(
     temperature: float,
     max_tokens: int,
     top_p: float,
-    reasoning_budget: int = 16384,
-    enable_thinking: bool = True,
 ) -> ChatNVIDIA:
     """Create a configured ChatNVIDIA client.
 
-    For thinking/reasoning models (e.g. nemotron-super), `reasoning_budget` controls
-    how many tokens the model may spend on internal reasoning, and
-    `chat_template_kwargs={"enable_thinking": True}` activates that reasoning pass.
-    Both must be set at construction time - they cannot be toggled per-request.
+    GPT-OSS 120B is exposed through NVIDIA's OpenAI-compatible chat completions
+    endpoint. LangChain's ChatNVIDIA class names the token limit
+    `max_completion_tokens`, even though the NVIDIA dashboard examples call it
+    `max_tokens`.
     """
     _register_strict_guide_model_if_missing(model_name)
 
@@ -120,13 +117,6 @@ def build_nvidia_chat_client(
         max_completion_tokens=max_tokens,
         top_p=top_p,
     )
-    if enable_thinking:
-        # NVIDIA reasoning controls are provider-specific; pass them through
-        # model_kwargs to avoid LangChain "unknown parameter" warnings.
-        kwargs["model_kwargs"] = {
-            "reasoning_budget": reasoning_budget,
-            "chat_template_kwargs": {"enable_thinking": True},
-        }
 
     try:
         return ChatNVIDIA(**kwargs)

@@ -650,7 +650,11 @@ async function runFollowupChat(input: {
       storage_url: string;
       file_sha256: string;
     }> = [];
-    if (!storedAssignmentPdfText) {
+    // Only re-download raw PDF bytes when we have no stored extractions at all.
+    // If storedAssignmentPdfExtractions is non-empty, it's already sent as
+    // assignment_pdf_extractions — re-sending the raw files causes redundant
+    // extraction on every message.
+    if (!storedAssignmentPdfText && storedAssignmentPdfExtractions.length === 0) {
       const snapshotPdfFiles = await listSignedSnapshotPdfFiles(sessionContext.assignmentUuid);
       snapshotPdfFilesForFallback = snapshotPdfFiles.map((f) => ({
         filename: f.filename,
@@ -728,6 +732,21 @@ async function runFollowupChat(input: {
         }
 
         await persistChain;
+
+        // Self-heal: if the agent extracted snapshot PDFs via fallback, persist
+        // them now so subsequent messages skip re-extraction.
+        const snapshotExtractions = Array.isArray(data.snapshot_pdf_extractions)
+          ? (data.snapshot_pdf_extractions as Array<{ file_sha256: string; full_text: string }>)
+              .filter((e) => typeof e.file_sha256 === "string" && typeof e.full_text === "string" && e.full_text.trim().length > 0)
+          : [];
+        if (snapshotExtractions.length > 0) {
+          persistSnapshotFileExtractions(
+            sessionContext.assignmentUuid,
+            snapshotExtractions.map((e) => ({ fileSha256: e.file_sha256, fullText: e.full_text })),
+          ).catch((err: unknown) => {
+            console.error("[chat-runner] Failed to persist chat-path snapshot extractions:", err);
+          });
+        }
 
         // Extract <calendar_proposal> blocks before persisting visible content
         const PROPOSAL_RE = /<calendar_proposal>([\s\S]*?)<\/calendar_proposal>/g;

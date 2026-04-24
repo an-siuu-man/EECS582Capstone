@@ -10,8 +10,8 @@ The FastAPI agent service receives normalized assignment payloads (plus optional
 - `app/api/v1/routes/runs.py`: Request handler wrapper for run execution.
 - `app/services/run_agent_service.py`: Request-level workflow orchestration.
 - `app/services/pdf_text_service.py`: Page-aware PDF extraction (native-first classification, selective OCR fallback, normalization, visual-significance extraction).
-- `app/orchestrators/headstart_orchestrator.py`: LLM prompting, structured parsing, retry/fallback logic.
-- `app/clients/llm_client.py`: LLM client factory (NVIDIA via LangChain).
+- `app/orchestrators/headstart_orchestrator.py`: LLM prompting, structured parsing, and streaming guide/chat generation.
+- `app/clients/llm_client.py`: LLM client factory for NVIDIA-hosted `openai/gpt-oss-120b` via LangChain.
 - `app/schemas/*`: Pydantic request/response and shared models.
 
 ## API Surface
@@ -95,8 +95,10 @@ Both run endpoints share the same internal handler path through `handle_run_agen
 
 ## LLM Orchestration Strategy
 
-- Primary mode: schema-bound structured output for reliable contract adherence.
-- Fallback mode: strict JSON prompt with retries (`MAX_RETRIES`) and parser repair.
+- Preferred streaming mode: NVIDIA-hosted `openai/gpt-oss-120b` through LangChain `ChatNVIDIA.stream`.
+- Streaming mode emits provider chunks directly for long-lived guide and chat responses.
+- Legacy non-stream primary mode: schema-bound structured output for reliable contract adherence.
+- Legacy non-stream fallback mode: strict JSON prompt with retries (`MAX_RETRIES`) and parser repair.
 - Parsing safeguards: markdown fence stripping, quote normalization, trailing comma cleanup, control-character cleanup, key quoting heuristics.
 
 ## Configuration and Dependencies

@@ -323,6 +323,22 @@ def stream_run_agent_workflow(req: RunAgentRequest, route_path: str) -> Generato
         )
 
 
+def _extract_user_pdf_files_deduped(pdf_files: list) -> list:
+    """Extract user-uploaded PDFs, skipping duplicate files by SHA256."""
+    seen_sha256: set[str] = set()
+    unique_files = []
+    for pdf_file in pdf_files:
+        sha256 = getattr(pdf_file, "file_sha256", None)
+        if sha256 and sha256 in seen_sha256:
+            filename = getattr(pdf_file, "filename", "attachment.pdf")
+            logger.info("Skipping duplicate user PDF %r (sha256=%s)", filename, sha256)
+            continue
+        unique_files.append(pdf_file)
+        if sha256:
+            seen_sha256.add(sha256)
+    return extract_pdf_extractions_from_pdf_files(unique_files, source="user_upload")
+
+
 def stream_chat_workflow(req: ChatStreamRequest, route_path: str) -> Generator[dict, None, None]:
     """
     Execute follow-up chat workflow and emit typed stream events for SSE clients.
@@ -381,10 +397,7 @@ def stream_chat_workflow(req: ChatStreamRequest, route_path: str) -> Generator[d
                 )
             ]
 
-        user_extractions = extract_pdf_extractions_from_pdf_files(
-            req.user_pdf_files or [],
-            source="user_upload",
-        )
+        user_extractions = _extract_user_pdf_files_deduped(req.user_pdf_files or [])
         user_attachments_context = format_pdf_extractions_for_prompt(
             user_extractions,
             source="user_upload",
@@ -469,6 +482,18 @@ def stream_chat_workflow(req: ChatStreamRequest, route_path: str) -> Generator[d
         thinking_content = "".join(reasoning_chunks).strip()
         if thinking_content:
             completed_payload["thinking_content"] = thinking_content
+
+        # Return extracted snapshot PDFs so the webapp can cache them and skip
+        # re-extraction on subsequent messages (self-healing for sessions that
+        # missed the initial persist).
+        snapshot_extractions = [
+            {"file_sha256": ext.file_sha256, "full_text": ext.full_text or ""}
+            for ext in user_extractions
+            if ext.file_sha256 and (ext.full_text or "").strip()
+        ]
+        if snapshot_extractions:
+            completed_payload["snapshot_pdf_extractions"] = snapshot_extractions
+
         yield _build_event("chat.completed", completed_payload)
     except Exception as exc:
         logger.exception("Streaming chat failed")
