@@ -25,6 +25,7 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
 import {
+  assignmentCategoryLabel,
   extractGuideMarkdown,
   formatDateTime,
   removeThinkBlocks,
@@ -51,6 +52,7 @@ const GUIDE_PROGRESS_STAGES = new Set([
   "calling_agent",
   "streaming_output",
   "validating_output",
+  "classifying_assignment",
   "parsing_response",
 ])
 
@@ -540,6 +542,7 @@ function DashboardChatPageContent() {
     }
     return "New Chat"
   }, [effectiveSession])
+  const categoryLabel = assignmentCategoryLabel(effectiveSession?.assignment_category)
 
   async function handleRegenerateGuide() {
     if (!sessionId || !effectiveSession || isRegenerating) return
@@ -679,6 +682,14 @@ function DashboardChatPageContent() {
       >
         <div className="min-w-0 flex items-center gap-2">
           <h1 className="text-lg font-heading font-medium tracking-tight">Session Chat</h1>
+          {categoryLabel ? (
+            <Badge
+              variant="outline"
+              className="w-fit border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-700 dark:text-emerald-200"
+            >
+              {categoryLabel}
+            </Badge>
+          ) : null}
           {effectiveSession ? (
             <Badge
               variant="outline"

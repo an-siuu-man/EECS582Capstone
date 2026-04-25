@@ -91,6 +91,8 @@ export function stageLabel(stage: ChatSessionStage) {
       return "Streaming Output"
     case "validating_output":
       return "Validating Output"
+    case "classifying_assignment":
+      return "Classifying assignment"
     case "parsing_response":
       return "Parsing Response"
     case "chat_streaming":
@@ -109,4 +111,23 @@ export function formatDateTime(value: number | string | null | undefined) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return null
   return format(date, "MMM d, yyyy h:mm a")
+}
+
+export function assignmentCategoryLabel(value: string | null | undefined) {
+  switch ((value ?? "").trim().toLowerCase()) {
+    case "coding":
+      return "Coding"
+    case "mathematics":
+      return "Mathematics"
+    case "science":
+      return "Science"
+    case "speech":
+      return "Speech"
+    case "essay":
+      return "Essay"
+    case "general":
+      return "General"
+    default:
+      return null
+  }
 }
