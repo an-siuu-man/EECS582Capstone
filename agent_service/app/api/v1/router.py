@@ -22,9 +22,11 @@ from fastapi import APIRouter
 
 from .routes.chats import router as chats_router
 from .routes.health import router as health_router
+from .routes.rag import router as rag_router
 from .routes.runs import router as runs_router
 
 api_v1_router = APIRouter()
 api_v1_router.include_router(health_router)
 api_v1_router.include_router(runs_router)
 api_v1_router.include_router(chats_router)
+api_v1_router.include_router(rag_router)

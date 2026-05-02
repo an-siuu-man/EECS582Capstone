@@ -103,6 +103,7 @@ export async function POST(req: Request) {
       sessionId: created.sessionId,
       assignmentUuid: created.assignmentUuid,
       payload: created.payload,
+      userId,
     });
 
     const snapshot = await getPersistedSessionSnapshot(created.sessionId);
