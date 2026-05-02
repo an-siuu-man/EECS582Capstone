@@ -4,12 +4,16 @@ from typing import Any
 
 from ..clients import embedding_client, supabase_client
 from ..schemas.rag import IndexAssignmentRequest, IndexAssignmentResponse
+from ..schemas.shared import ImageFile, PdfFile
+from ..services.image_extraction_service import extract_image_from_file
+from ..services.pdf_extraction_service import extract_pdf_extractions_from_pdf_files
 from ..services.rag_chunking_service import (
     RagChunk,
     chunk_assignment_payload,
     chunk_assignment_pdf,
     chunk_guide_markdown,
     chunk_rubric,
+    compute_content_hash,
 )
 
 logger = logging.getLogger(__name__)
@@ -85,6 +89,153 @@ def _index_chunks(
 
     supabase_client.bulk_insert_rag_chunks(rows)
     return len(rows), skipped
+
+
+def _tag_chunks(chunks: list[RagChunk], metadata: dict[str, Any]) -> list[RagChunk]:
+    tagged: list[RagChunk] = []
+    for chunk in chunks:
+        tagged.append(
+            RagChunk(
+                text=chunk.text,
+                metadata={**chunk.metadata, **metadata},
+                content_hash=chunk.content_hash,
+            )
+        )
+    return tagged
+
+
+def _pdf_extraction_text_for_chunking(extraction: Any) -> str:
+    page_blocks: list[str] = []
+    for page in getattr(extraction, "pages", []) or []:
+        text = (getattr(page, "text", "") or "").strip()
+        if not text:
+            continue
+        page_number = getattr(page, "page_number", 1) or 1
+        method = getattr(page, "method", "native") or "native"
+        page_blocks.append(f"--- Page {page_number} ({method}) ---\n{text}")
+    if page_blocks:
+        return "\n\n".join(page_blocks)
+    return (getattr(extraction, "full_text", "") or "").strip()
+
+
+def _split_image_description(
+    text: str,
+    source_id: str,
+    metadata: dict[str, Any],
+) -> list[RagChunk]:
+    normalized = (text or "").strip()
+    if not normalized:
+        return []
+
+    chunk_size = 1200
+    overlap = 150
+    chunks: list[RagChunk] = []
+    start = 0
+    while start < len(normalized):
+        piece = normalized[start : start + chunk_size].strip()
+        if piece:
+            chunks.append(
+                RagChunk(
+                    text=piece,
+                    metadata={**metadata, "chunk_part": len(chunks) + 1},
+                    content_hash=compute_content_hash("user_upload_image", source_id, piece),
+                )
+            )
+        if start + chunk_size >= len(normalized):
+            break
+        start += chunk_size - overlap
+    return chunks
+
+
+def _upload_metadata(upload_file: Any, session_id: str) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "session_id": session_id,
+        "filename": upload_file.filename,
+    }
+    if upload_file.file_sha256:
+        metadata["file_sha256"] = upload_file.file_sha256
+    if upload_file.mime_type:
+        metadata["mime_type"] = upload_file.mime_type
+    return metadata
+
+
+def _index_upload_file(
+    upload_file: Any,
+    source_type: str,
+    user_id: str,
+    assignment_uuid: str,
+    assignment_snapshot_id: str | None,
+    fallback_session_id: str | None,
+    force_reindex: bool,
+) -> tuple[int, int, int]:
+    session_id = str(upload_file.session_id or fallback_session_id or "")
+    if not session_id:
+        logger.debug("[rag-index] %s upload skipped: no session_id", source_type)
+        return 0, 0, 0
+    if not upload_file.storage_url:
+        logger.debug("[rag-index] %s upload skipped: no storage_url", source_type)
+        return 0, 0, 0
+
+    upload_identity = upload_file.file_sha256 or upload_file.filename
+    source_id = f"{session_id}:{upload_identity}"
+    metadata = _upload_metadata(upload_file, session_id)
+    title = upload_file.filename
+    doc = _build_rag_document(
+        user_id=user_id,
+        assignment_uuid=assignment_uuid,
+        assignment_snapshot_id=assignment_snapshot_id,
+        source_type=source_type,
+        source_id=source_id,
+        title=title,
+        content_hash=source_id,
+        metadata=metadata,
+    )
+    persisted_doc = supabase_client.upsert_rag_document(doc)
+    doc_id = persisted_doc["id"]
+    existing = supabase_client.get_existing_chunk_hashes(doc_id) if not force_reindex else set()
+    if existing and not force_reindex:
+        return 1, 0, len(existing)
+
+    if source_type == "user_upload_pdf":
+        pdf_file = PdfFile(
+            filename=upload_file.filename,
+            storage_url=upload_file.storage_url,
+            file_sha256=upload_file.file_sha256,
+        )
+        extractions = extract_pdf_extractions_from_pdf_files([pdf_file], source="user_upload")
+        chunks: list[RagChunk] = []
+        for extraction in extractions:
+            extraction_text = _pdf_extraction_text_for_chunking(extraction)
+            chunks.extend(chunk_assignment_pdf(extraction_text, source_id, filename=upload_file.filename))
+        chunks = _tag_chunks(chunks, metadata)
+    elif source_type == "user_upload_image":
+        image_file = ImageFile(
+            filename=upload_file.filename,
+            mime_type=upload_file.mime_type or "image/png",
+            storage_url=upload_file.storage_url,
+            file_sha256=upload_file.file_sha256,
+        )
+        result = extract_image_from_file(image_file)
+        if result.status not in ("success", "empty") or not result.description.strip():
+            return 1, 0, 0
+        chunks = _split_image_description(result.description, source_id, metadata)
+    else:
+        return 0, 0, 0
+
+    if not chunks:
+        return 1, 0, 0
+
+    indexed, skipped = _index_chunks(
+        doc_id,
+        user_id,
+        assignment_uuid,
+        source_type,
+        source_id,
+        chunks,
+        existing,
+        force_reindex,
+    )
+    return 1, indexed, skipped
 
 
 def index_assignment(request: IndexAssignmentRequest) -> IndexAssignmentResponse:
@@ -195,6 +346,26 @@ def index_assignment(request: IndexAssignmentRequest) -> IndexAssignmentResponse
                 total_indexed += indexed
                 total_skipped += skipped
             continue  # already processed per-file above
+
+        elif source_type in ("user_upload_pdf", "user_upload_image"):
+            upload_files = request.upload_files or []
+            if not upload_files:
+                logger.debug("[rag-index] %s requested but no upload_files provided", source_type)
+                continue
+            for upload_file in upload_files:
+                doc_count, indexed, skipped = _index_upload_file(
+                    upload_file=upload_file,
+                    source_type=source_type,
+                    user_id=user_id,
+                    assignment_uuid=assignment_uuid,
+                    assignment_snapshot_id=snapshot_id,
+                    fallback_session_id=session_id,
+                    force_reindex=request.force_reindex,
+                )
+                total_docs += doc_count
+                total_indexed += indexed
+                total_skipped += skipped
+            continue
 
         else:
             logger.warning("[rag-index] Unknown source_type=%s, skipping", source_type)

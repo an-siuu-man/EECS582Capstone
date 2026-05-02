@@ -21,12 +21,21 @@ ALL_MVP_SOURCES: List[RagSourceType] = [
 ]
 
 
+class UploadFileRef(BaseModel):
+    filename: str
+    storage_url: str
+    file_sha256: Optional[str] = None
+    mime_type: Optional[str] = None
+    session_id: Optional[UUID] = None
+
+
 class IndexAssignmentRequest(BaseModel):
     user_id: UUID
     assignment_uuid: UUID
     session_id: Optional[UUID] = None
     sources: List[str] = Field(default_factory=lambda: list(ALL_MVP_SOURCES))
     force_reindex: bool = False
+    upload_files: Optional[List[UploadFileRef]] = None
 
 
 class IndexAssignmentResponse(BaseModel):

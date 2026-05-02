@@ -433,6 +433,7 @@ class TestRunAgentService(unittest.TestCase):
             ],
             user_id="aaaaaaaa-0000-0000-0000-000000000001",
             assignment_uuid="bbbbbbbb-0000-0000-0000-000000000002",
+            session_id="cccccccc-0000-0000-0000-000000000003",
             retrieval_mode="semantic",
             user_message="What does the rubric require?",
         )
@@ -441,7 +442,7 @@ class TestRunAgentService(unittest.TestCase):
         with patch(
             "app.services.run_agent_service.retrieve_rag_chunks",
             return_value=semantic,
-        ), patch(
+        ) as mock_retrieve, patch(
             "app.services.run_agent_service._stream_headstart_chat_answer",
             return_value=iter([{"content_delta": "Use the rubric.", "reasoning_delta": ""}]),
         ) as mock_stream:
@@ -453,6 +454,10 @@ class TestRunAgentService(unittest.TestCase):
         completed = [event for event in events if event.get("event") == "chat.completed"][0]["data"]
         self.assertEqual(completed["sources"][0]["source_type"], "rubric")
         self.assertEqual(completed["sources"][0]["label"], "A")
+        self.assertEqual(
+            mock_retrieve.call_args.kwargs["session_id"],
+            req.session_id,
+        )
 
     def test_stream_chat_workflow_hybrid_mode_merges_and_deduplicates(self):
         req = ChatStreamRequest(

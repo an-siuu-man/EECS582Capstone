@@ -4,6 +4,7 @@ import {
 } from "@/lib/chat-repository";
 import { applyAuthCookies, resolveRequestUser } from "@/lib/auth/session";
 import {
+  supabaseStorageCreateSignedUrl,
   supabaseStorageUploadObject,
   supabaseTableRequest,
 } from "@/lib/supabase-rest";
@@ -17,6 +18,7 @@ const PDF_BUCKET =
 const IMAGE_BUCKET =
   (process.env.SUPABASE_ASSIGNMENT_IMAGE_BUCKET ?? PDF_BUCKET);
 const CHAT_UPLOAD_MAX_BYTES = 10 * 1024 * 1024; // 10 MB
+const UPLOAD_SIGNED_URL_TTL_SECONDS = 600;
 
 function bufferToHex(buffer: ArrayBuffer) {
   return Array.from(new Uint8Array(buffer))
@@ -61,6 +63,44 @@ function detectKind(bytes: Uint8Array): DetectedKind {
     return { kind: "image", mimeType: "image/jpeg", ext: "jpg" };
   }
   return null;
+}
+
+async function fireUploadRagIndexing(input: {
+  kind: ChatAttachmentKind;
+  filename: string;
+  fileSha256: string;
+  mimeType: string;
+  signedUrl: string;
+  userId: string;
+  assignmentUuid: string;
+  sessionId: string;
+}) {
+  const agentUrl = process.env.AGENT_SERVICE_URL;
+  if (!agentUrl) return;
+
+  try {
+    await fetch(`${agentUrl}/api/v1/rag/index-assignment`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_id: input.userId,
+        assignment_uuid: input.assignmentUuid,
+        session_id: input.sessionId,
+        sources: [input.kind === "image" ? "user_upload_image" : "user_upload_pdf"],
+        upload_files: [
+          {
+            filename: input.filename,
+            storage_url: input.signedUrl,
+            file_sha256: input.fileSha256,
+            mime_type: input.mimeType,
+            session_id: input.sessionId,
+          },
+        ],
+      }),
+    });
+  } catch (err) {
+    console.error("[chat-attachments] RAG upload indexing fire-and-forget failed:", err);
+  }
 }
 
 export async function POST(
@@ -196,6 +236,26 @@ export async function POST(
       headers: { Prefer: "return=minimal" },
       body: { uploaded_at: uploadedAt },
     });
+  }
+
+  try {
+    const signedUrl = await supabaseStorageCreateSignedUrl({
+      bucket,
+      path: storagePath,
+      expiresInSeconds: UPLOAD_SIGNED_URL_TTL_SECONDS,
+    });
+    void fireUploadRagIndexing({
+      kind,
+      filename,
+      fileSha256,
+      mimeType,
+      signedUrl,
+      userId,
+      assignmentUuid: session.assignment_uuid,
+      sessionId,
+    });
+  } catch (err) {
+    console.error(`[chat-attachments] Failed to start RAG indexing for "${filename}":`, err);
   }
 
   const response = NextResponse.json({

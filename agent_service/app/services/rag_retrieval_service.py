@@ -85,6 +85,7 @@ def retrieve(
     query: str,
     user_id: UUID,
     assignment_uuid: UUID,
+    session_id: UUID | None = None,
     top_k: int = DEFAULT_TOP_K,
     source_types: list[str] | None = None,
 ) -> list[RetrievedChunk]:
@@ -94,6 +95,7 @@ def retrieve(
         query: User query to embed and search.
         user_id: User UUID used to isolate RAG chunks.
         assignment_uuid: Assignment UUID used to isolate RAG chunks.
+        session_id: Optional chat session UUID used to isolate user-upload chunks.
         top_k: Maximum number of chunks to return after caps and deduplication.
         source_types: Optional source type filter.
 
@@ -112,6 +114,7 @@ def retrieve(
         assignment_uuid=str(assignment_uuid),
         match_count=max(limit * 3, limit),
         source_types=source_types,
+        session_id=str(session_id) if session_id else None,
     )
     if not rows:
         return []
