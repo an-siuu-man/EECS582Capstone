@@ -67,6 +67,8 @@ export async function POST(
       assistantMessageId: assistantMessage.id,
       versionNumber,
       requestUrl: req.url,
+      userId,
+      assignmentUuid: session.assignment_uuid,
     });
 
     const response = NextResponse.json({

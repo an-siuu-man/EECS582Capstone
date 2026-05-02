@@ -237,12 +237,31 @@ async function openAgentChatStream(agentUrl: string, body: string) {
   });
 }
 
+async function fireRagIndexing(
+  agentUrl: string,
+  userId: string,
+  assignmentUuid: string,
+  sessionId: string,
+  sources: string[],
+): Promise<void> {
+  try {
+    await fetch(`${agentUrl}/api/v1/rag/index-assignment`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId, assignment_uuid: assignmentUuid, session_id: sessionId, sources }),
+    });
+  } catch (err) {
+    console.error("[chat-runner] RAG indexing fire-and-forget failed:", err);
+  }
+}
+
 async function runInitialGuide(input: {
   sessionId: string;
   assignmentUuid: string;
   payload: AssignmentPayload;
+  userId: string;
 }) {
-  const { sessionId, assignmentUuid, payload } = input;
+  const { sessionId, assignmentUuid, payload, userId } = input;
   let flushTimer: ReturnType<typeof setInterval> | null = null;
   let bufferedDelta = "";
   let bufferedProgress: number | null = null;
@@ -441,6 +460,17 @@ async function runInitialGuide(input: {
           }
         }
 
+        // Trigger RAG indexing fire-and-forget after the initial guide is ready.
+        const ragAgentUrl = process.env.AGENT_SERVICE_URL;
+        if (ragAgentUrl && userId) {
+          void fireRagIndexing(ragAgentUrl, userId, assignmentUuid, sessionId, [
+            "assignment_payload",
+            "rubric",
+            "guide_markdown",
+            "assignment_pdf",
+          ]);
+        }
+
         hasCompleted = true;
         break;
       }
@@ -474,6 +504,7 @@ export function startChatSessionRun(input: {
   sessionId: string;
   assignmentUuid: string;
   payload: AssignmentPayload;
+  userId: string;
 }) {
   void runInitialGuide(input);
 }
@@ -903,8 +934,10 @@ async function runGuideRegeneration(input: {
   assistantMessageId: string;
   versionNumber: number;
   requestUrl: string;
+  userId: string;
+  assignmentUuid: string;
 }) {
-  const { sessionId, assistantMessageId, versionNumber } = input;
+  const { sessionId, assistantMessageId, versionNumber, userId, assignmentUuid } = input;
   let flushTimer: ReturnType<typeof setInterval> | null = null;
   let bufferedDelta = "";
   let assistantContent = "";
@@ -1084,6 +1117,12 @@ async function runGuideRegeneration(input: {
           error: undefined,
         });
 
+        // Re-index guide markdown after regeneration (fire-and-forget).
+        const ragAgentUrl = process.env.AGENT_SERVICE_URL;
+        if (ragAgentUrl && userId) {
+          void fireRagIndexing(ragAgentUrl, userId, assignmentUuid, sessionId, ["guide_markdown"]);
+        }
+
         hasCompleted = true;
         break;
       }
@@ -1147,6 +1186,8 @@ export function startGuideRegeneration(input: {
   assistantMessageId: string;
   versionNumber: number;
   requestUrl: string;
+  userId: string;
+  assignmentUuid: string;
 }) {
   void runGuideRegeneration(input);
 }
