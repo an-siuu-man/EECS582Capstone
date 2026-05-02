@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 from uuid import UUID
 
 from app.schemas.rag import IndexAssignmentRequest
+from app.schemas.shared import PdfExtraction, PdfPageExtraction
 from app.services import rag_index_service as svc
 
 
@@ -146,6 +147,120 @@ class TestIndexAssignment(unittest.TestCase):
 
         self.assertEqual(result.status, "no_sources")
         self.assertEqual(result.indexed_chunks, 0)
+
+    def test_user_upload_pdf_triggers_extraction_and_upsert(self):
+        mock_sb = _mock_supabase()
+        extraction = PdfExtraction(
+            filename="notes.pdf",
+            source="user_upload",
+            file_sha256="sha-pdf",
+            full_text="",
+            pages=[
+                PdfPageExtraction(
+                    page_number=1,
+                    text="Important uploaded PDF instructions for the assignment.",
+                    method="native",
+                    confidence=1.0,
+                )
+            ],
+        )
+
+        with patch("app.services.rag_index_service.supabase_client", mock_sb), \
+             patch("app.services.rag_index_service.embedding_client") as mock_emb, \
+             patch(
+                 "app.services.rag_index_service.extract_pdf_extractions_from_pdf_files",
+                 return_value=[extraction],
+             ) as mock_extract:
+            mock_emb.embed_documents.return_value = [[0.1] * 2048] * 5
+            req = _make_request(
+                sources=["user_upload_pdf"],
+                upload_files=[
+                    {
+                        "filename": "notes.pdf",
+                        "storage_url": "https://signed.example/notes.pdf",
+                        "file_sha256": "sha-pdf",
+                        "mime_type": "application/pdf",
+                        "session_id": "cccccccc-0000-0000-0000-000000000003",
+                    }
+                ],
+            )
+            result = svc.index_assignment(req)
+
+        mock_extract.assert_called_once()
+        mock_sb.bulk_insert_rag_chunks.assert_called_once()
+        inserted = mock_sb.bulk_insert_rag_chunks.call_args.args[0]
+        self.assertEqual(inserted[0]["source_type"], "user_upload_pdf")
+        self.assertEqual(inserted[0]["metadata"]["session_id"], "cccccccc-0000-0000-0000-000000000003")
+        self.assertEqual(inserted[0]["metadata"]["filename"], "notes.pdf")
+        self.assertEqual(result.indexed_chunks, 1)
+
+    def test_user_upload_pdf_skips_extraction_when_chunks_exist(self):
+        mock_sb = _mock_supabase(existing_hashes={"existing-hash"})
+
+        with patch("app.services.rag_index_service.supabase_client", mock_sb), \
+             patch("app.services.rag_index_service.embedding_client") as mock_emb, \
+             patch(
+                 "app.services.rag_index_service.extract_pdf_extractions_from_pdf_files",
+             ) as mock_extract:
+            req = _make_request(
+                sources=["user_upload_pdf"],
+                upload_files=[
+                    {
+                        "filename": "notes.pdf",
+                        "storage_url": "https://signed.example/notes.pdf",
+                        "file_sha256": "sha-pdf",
+                        "mime_type": "application/pdf",
+                        "session_id": "cccccccc-0000-0000-0000-000000000003",
+                    }
+                ],
+            )
+            result = svc.index_assignment(req)
+
+        mock_extract.assert_not_called()
+        mock_emb.embed_documents.assert_not_called()
+        mock_sb.bulk_insert_rag_chunks.assert_not_called()
+        self.assertEqual(result.indexed_chunks, 0)
+        self.assertEqual(result.skipped_unchanged_chunks, 1)
+
+    def test_user_upload_image_indexes_vlm_description(self):
+        mock_sb = _mock_supabase()
+        image_result = type(
+            "ImageResult",
+            (),
+            {
+                "status": "success",
+                "description": "EXTRACTED TEXT:\nUse Bayes theorem.\n\nCONTEXT:\nHandwritten notes.",
+            },
+        )()
+
+        with patch("app.services.rag_index_service.supabase_client", mock_sb), \
+             patch("app.services.rag_index_service.embedding_client") as mock_emb, \
+             patch(
+                 "app.services.rag_index_service.extract_image_from_file",
+                 return_value=image_result,
+             ) as mock_extract:
+            mock_emb.embed_documents.return_value = [[0.1] * 2048] * 5
+            req = _make_request(
+                sources=["user_upload_image"],
+                upload_files=[
+                    {
+                        "filename": "notes.png",
+                        "storage_url": "https://signed.example/notes.png",
+                        "file_sha256": "sha-image",
+                        "mime_type": "image/png",
+                        "session_id": "cccccccc-0000-0000-0000-000000000003",
+                    }
+                ],
+            )
+            result = svc.index_assignment(req)
+
+        mock_extract.assert_called_once()
+        inserted = mock_sb.bulk_insert_rag_chunks.call_args.args[0]
+        self.assertEqual(inserted[0]["source_type"], "user_upload_image")
+        self.assertEqual(inserted[0]["metadata"]["session_id"], "cccccccc-0000-0000-0000-000000000003")
+        self.assertEqual(inserted[0]["metadata"]["mime_type"], "image/png")
+        self.assertIn("Bayes theorem", inserted[0]["text"])
+        self.assertEqual(result.indexed_chunks, 1)
 
 
 class TestIndexAssignmentResponse(unittest.TestCase):

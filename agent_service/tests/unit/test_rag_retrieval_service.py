@@ -6,6 +6,7 @@ from app.services import rag_retrieval_service as svc
 
 USER_ID = UUID("aaaaaaaa-0000-0000-0000-000000000001")
 ASSIGNMENT_UUID = UUID("bbbbbbbb-0000-0000-0000-000000000002")
+SESSION_ID = UUID("cccccccc-0000-0000-0000-000000000003")
 
 
 def _row(index: int, source_type: str, text: str | None = None) -> dict:
@@ -81,6 +82,26 @@ class TestRagRetrievalService(unittest.TestCase):
 
         self.assertEqual(result, [])
         mock_emb.embed_documents.assert_not_called()
+
+    def test_session_id_is_passed_to_match_rpc(self):
+        with patch("app.services.rag_retrieval_service.embedding_client") as mock_emb, patch(
+            "app.services.rag_retrieval_service.supabase_client",
+        ) as mock_sb:
+            mock_emb.embed_query.return_value = [1.0, 0.0]
+            mock_sb.match_rag_chunks.return_value = [_row(1, "user_upload_pdf")]
+
+            result = svc.retrieve(
+                "uploaded notes",
+                USER_ID,
+                ASSIGNMENT_UUID,
+                session_id=SESSION_ID,
+            )
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(
+            mock_sb.match_rag_chunks.call_args.kwargs["session_id"],
+            "cccccccc-0000-0000-0000-000000000003",
+        )
 
 
 if __name__ == "__main__":
