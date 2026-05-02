@@ -108,13 +108,36 @@ export type ChatSessionStage =
 export type ChatMessageRole = "user" | "assistant" | "system";
 export type ChatMessageFormat = "plain_text" | "markdown" | "json";
 
+export type RagSourceType =
+  | "assignment_payload"
+  | "rubric"
+  | "guide_markdown"
+  | "assignment_pdf"
+  | "user_upload_pdf"
+  | "user_upload_image";
+
+export type RetrievedChunk = {
+  chunk_id: string;
+  document_id: string;
+  source_type: RagSourceType;
+  source_id: string;
+  text?: string;
+  metadata: Record<string, unknown>;
+  similarity: number;
+  label?: string | null;
+};
+
+export type ChatMessageMetadata = Record<string, unknown> & {
+  sources?: RetrievedChunk[];
+};
+
 export type ChatMessageDto = {
   id: string;
   message_index: number;
   sender_role: ChatMessageRole;
   content_text: string;
   content_format: ChatMessageFormat;
-  metadata: Record<string, unknown>;
+  metadata: ChatMessageMetadata;
   created_at: string;
 };
 
