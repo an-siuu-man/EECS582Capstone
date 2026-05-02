@@ -38,6 +38,7 @@ type AgentRunEventName =
 
 type AgentChatEventName =
   | "chat.started"
+  | "chat.retrieval_warning"
   | "chat.delta"
   | "chat.completed"
   | "chat.error"
@@ -727,6 +728,9 @@ async function runFollowupChat(input: {
         guide_markdown: sessionContext.guideMarkdown,
         chat_history: chatHistory,
         retrieval_context: retrievalContext,
+        user_id: sessionContext.userId,
+        assignment_uuid: sessionContext.assignmentUuid,
+        retrieval_mode: "hybrid",
         user_message: userMessageContent,
         thinking_mode: false,
         calendar_context: calendarContext,
@@ -762,6 +766,11 @@ async function runFollowupChat(input: {
               ? data.status_message
               : "Generating follow-up response",
         });
+        continue;
+      }
+
+      if (event === "chat.retrieval_warning") {
+        console.warn("[chat-runner] Semantic retrieval warning:", data.message ?? data);
         continue;
       }
 
@@ -830,6 +839,7 @@ async function runFollowupChat(input: {
         assistantContent = assistantContent
           .replace(/<calendar_proposal>[\s\S]*?<\/calendar_proposal>/g, "")
           .trim();
+        const sources = Array.isArray(data.sources) ? data.sources : [];
 
         await updateChatMessageContent({
           messageId: assistantMessageId,
@@ -837,6 +847,7 @@ async function runFollowupChat(input: {
           metadata: {
             streaming: false,
             completed: true,
+            ...(sources.length > 0 ? { sources } : {}),
             ...(firstProposal ? { calendar_proposal: firstProposal } : {}),
           },
         });
@@ -1026,6 +1037,9 @@ async function runGuideRegeneration(input: {
         guide_markdown: sessionContext.guideMarkdown,
         chat_history: chatHistory,
         retrieval_context: retrievalContext,
+        user_id: userId,
+        assignment_uuid: assignmentUuid,
+        retrieval_mode: "hybrid",
         user_message: regenerationInstruction,
         thinking_mode: false,
         // Omit calendar_context entirely — guide updates should not include scheduling
@@ -1055,6 +1069,11 @@ async function runGuideRegeneration(input: {
           progressPercent: toPercent(data.progress_percent, 97),
           statusMessage: `Updating guide (v${versionNumber})`,
         });
+        continue;
+      }
+
+      if (event === "chat.retrieval_warning") {
+        console.warn("[chat-runner] Semantic retrieval warning during guide update:", data.message ?? data);
         continue;
       }
 
