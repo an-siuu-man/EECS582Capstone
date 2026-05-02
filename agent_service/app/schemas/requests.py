@@ -102,6 +102,7 @@ class ChatStreamRequest(BaseModel):
     retrieval_context: List[RetrievalChunk] = Field(default_factory=list)
     user_id: Optional[UUID] = None
     assignment_uuid: Optional[UUID] = None
+    session_id: Optional[UUID] = None
     retrieval_mode: Literal["semantic", "hybrid", "lexical"] = "hybrid"
     retrieval_top_k: int = 12
     source_types: Optional[List[RagSourceType]] = None

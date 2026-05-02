@@ -547,6 +547,7 @@ def stream_chat_workflow(req: ChatStreamRequest, route_path: str) -> Generator[d
                     query=req.user_message,
                     user_id=req.user_id,
                     assignment_uuid=req.assignment_uuid,
+                    session_id=req.session_id,
                     top_k=req.retrieval_top_k,
                     source_types=req.source_types,
                 )
