@@ -23,7 +23,13 @@ import {
 } from "@/lib/chat-repository";
 import { supabaseStorageCreateSignedUrl } from "@/lib/supabase-rest";
 import { getSharedAssignmentCalendarContextForChat } from "@/lib/assignment-calendar-context";
-import { type AssignmentPayload, type ChatAttachment } from "@/lib/chat-types";
+import {
+  type AssignmentPayload,
+  type ChatAttachment,
+  type ChatMessageMetadata,
+  type RagSourceType,
+  type RetrievedChunk,
+} from "@/lib/chat-types";
 import { type SseMessage, readSseStream } from "@/lib/sse";
 import { toOptionalString } from "@/lib/utils";
 import { retrieveLexicalContext } from "@/lib/rag/lexical-retriever";
@@ -161,6 +167,53 @@ function parseChatEvent(message: SseMessage) {
     event: eventName,
     data,
   };
+}
+
+function isRagSourceType(value: unknown): value is RagSourceType {
+  return (
+    value === "assignment_payload" ||
+    value === "rubric" ||
+    value === "guide_markdown" ||
+    value === "assignment_pdf" ||
+    value === "user_upload_pdf" ||
+    value === "user_upload_image"
+  );
+}
+
+function toRetrievedChunk(value: unknown): RetrievedChunk | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const source = value as Record<string, unknown>;
+  if (
+    typeof source.chunk_id !== "string" ||
+    typeof source.document_id !== "string" ||
+    !isRagSourceType(source.source_type) ||
+    typeof source.source_id !== "string" ||
+    typeof source.similarity !== "number"
+  ) {
+    return null;
+  }
+  const metadata =
+    source.metadata && typeof source.metadata === "object" && !Array.isArray(source.metadata)
+      ? (source.metadata as Record<string, unknown>)
+      : {};
+
+  return {
+    chunk_id: source.chunk_id,
+    document_id: source.document_id,
+    source_type: source.source_type,
+    source_id: source.source_id,
+    ...(typeof source.text === "string" ? { text: source.text } : {}),
+    metadata,
+    similarity: source.similarity,
+    ...(typeof source.label === "string" || source.label === null ? { label: source.label } : {}),
+  };
+}
+
+function toRetrievedChunks(value: unknown): RetrievedChunk[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(toRetrievedChunk).filter((chunk): chunk is RetrievedChunk => chunk !== null);
 }
 
 function toStage(value: unknown) {
@@ -541,14 +594,20 @@ async function runFollowupChat(input: {
   let persistChain: Promise<void> = Promise.resolve();
   let lastPersistAt = 0;
   let pendingPersist = false;
+  let assistantMetadata: ChatMessageMetadata = {};
 
-  const persistAssistant = (content: string, metadata: Record<string, unknown>) => {
+  const persistAssistant = (content: string, metadata: ChatMessageMetadata) => {
+    assistantMetadata = {
+      ...assistantMetadata,
+      ...metadata,
+    };
+    const metadataToPersist = assistantMetadata;
     persistChain = persistChain
       .then(async () => {
         await updateChatMessageContent({
           messageId: assistantMessageId,
           content,
-          metadata,
+          metadata: metadataToPersist,
         });
       })
       .catch(() => undefined);
@@ -840,17 +899,19 @@ async function runFollowupChat(input: {
         assistantContent = assistantContent
           .replace(/<calendar_proposal>[\s\S]*?<\/calendar_proposal>/g, "")
           .trim();
-        const sources = Array.isArray(data.sources) ? data.sources : [];
+        const sources = toRetrievedChunks(data.sources);
+        assistantMetadata = {
+          ...assistantMetadata,
+          streaming: false,
+          completed: true,
+          ...(sources.length > 0 ? { sources } : {}),
+          ...(firstProposal ? { calendar_proposal: firstProposal } : {}),
+        };
 
         await updateChatMessageContent({
           messageId: assistantMessageId,
           content: assistantContent,
-          metadata: {
-            streaming: false,
-            completed: true,
-            ...(sources.length > 0 ? { sources } : {}),
-            ...(firstProposal ? { calendar_proposal: firstProposal } : {}),
-          },
+          metadata: assistantMetadata,
         });
 
         emitChatMessageCompleted(sessionId, {

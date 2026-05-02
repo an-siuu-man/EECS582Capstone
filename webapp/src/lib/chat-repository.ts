@@ -2,6 +2,7 @@
 
 import {
   type AssignmentPayload,
+  type ChatMessageMetadata,
   type ChatMessageDto,
   type ChatMessageFormat,
   type ChatMessageRole,
@@ -172,8 +173,12 @@ function asObject(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function asChatMessageMetadata(value: unknown): ChatMessageMetadata {
+  return asObject(value) as ChatMessageMetadata;
+}
+
 function toMessageDto(row: DbChatMessage): ChatMessageDto {
-  const metadata = asObject(row.metadata);
+  const metadata = asChatMessageMetadata(row.metadata);
   return {
     id: row.id,
     message_index: row.message_index,
@@ -1899,7 +1904,7 @@ export async function createChatMessage(input: {
 export async function updateChatMessageContent(input: {
   messageId: string;
   content: string;
-  metadata?: Record<string, unknown>;
+  metadata?: ChatMessageMetadata;
 }) {
   const patch: Record<string, unknown> = {
     content_text: input.content,
@@ -1922,7 +1927,7 @@ export async function updateChatMessageContent(input: {
 export async function updateChatMessageMetadata(
   sessionId: string,
   messageId: string,
-  metadata: Record<string, unknown>,
+  metadata: ChatMessageMetadata,
 ) {
   const row = await patchSingle<DbChatMessage>({
     table: "chat_messages",
@@ -1933,6 +1938,18 @@ export async function updateChatMessageMetadata(
     patch: { metadata },
   });
   return toMessageDto(row);
+}
+
+export async function getMessageMetadata(messageId: string): Promise<ChatMessageMetadata> {
+  const row = await selectFirst<Pick<DbChatMessage, "metadata">>({
+    table: "chat_messages",
+    query: {
+      id: eq(messageId),
+      select: "metadata",
+      limit: 1,
+    },
+  });
+  return asChatMessageMetadata(row?.metadata);
 }
 
 export async function getSessionGuideAndHistory(sessionId: string) {
@@ -2475,4 +2492,3 @@ export async function listResourcesForUser(input: {
     },
   };
 }
-
