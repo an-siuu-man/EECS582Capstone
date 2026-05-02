@@ -5,6 +5,74 @@ import { type ChatSessionStage } from "@/lib/chat-types"
 const THINK_OPEN_TAG = "<think>"
 const THINK_CLOSE_TAG = "</think>"
 
+function normalizeLatexDelimitersOutsideCode(markdown: string) {
+  if (!markdown) return ""
+
+  const normalizeText = (text: string) => {
+    let out = text
+
+    const toBlock = (_match: string, inner: string) => `\n$$\n${inner}\n$$\n`
+    const toInline = (_match: string, inner: string) => `$${inner}$`
+
+    // Display math: handle single- and double-escaped delimiter pairs.
+    out = out
+      .replaceAll(/\\\\\[(?![0-9.])([\s\S]*?)\\\\\]/g, toBlock)
+      .replaceAll(/\\\\\[(?![0-9.])([\s\S]*?)\\\]/g, toBlock)
+      .replaceAll(/\\\[(?![0-9.])([\s\S]*?)\\\\\]/g, toBlock)
+      .replaceAll(/\\\[(?![0-9.])([\s\S]*?)\\\]/g, toBlock)
+
+    // Inline math: handle single- and double-escaped delimiter pairs.
+    out = out
+      .replaceAll(/\\\\\(([\s\S]*?)\\\\\)/g, toInline)
+      .replaceAll(/\\\\\(([\s\S]*?)\\\)/g, toInline)
+      .replaceAll(/\\\(([\s\S]*?)\\\\\)/g, toInline)
+      .replaceAll(/\\\(([\s\S]*?)\\\)/g, toInline)
+
+    // Fallback: convert any remaining delimiter tokens.
+    out = out
+      .replaceAll(/\\\\\[(?![0-9.])/g, () => "$$")
+      .replaceAll(/\\\\\]/g, () => "$$")
+      .replaceAll(/\\\\\(/g, () => "$")
+      .replaceAll(/\\\\\)/g, () => "$")
+      .replaceAll(/\\\[(?![0-9.])/g, () => "$$")
+      .replaceAll(/\\\]/g, () => "$$")
+      .replaceAll(/\\\(/g, () => "$")
+      .replaceAll(/\\\)/g, () => "$")
+
+    return out
+  }
+
+  const normalizeOutsideInlineCode = (text: string) => {
+    const inlineCodeRegex = /`[^`]*`/g
+    let out = ""
+    let cursor = 0
+    for (const match of text.matchAll(inlineCodeRegex)) {
+      const start = match.index ?? 0
+      out += normalizeText(text.slice(cursor, start))
+      out += match[0]
+      cursor = start + match[0].length
+    }
+    out += normalizeText(text.slice(cursor))
+    return out
+  }
+
+  const fencedCodeRegex = /```[\s\S]*?```/g
+  let out = ""
+  let cursor = 0
+  for (const match of markdown.matchAll(fencedCodeRegex)) {
+    const start = match.index ?? 0
+    out += normalizeOutsideInlineCode(markdown.slice(cursor, start))
+    out += match[0]
+    cursor = start + match[0].length
+  }
+  out += normalizeOutsideInlineCode(markdown.slice(cursor))
+  return out
+}
+
+export function normalizeMarkdownMathDelimiters(markdown: string) {
+  return normalizeLatexDelimitersOutsideCode(markdown)
+}
+
 export function normalizeResult(result: unknown) {
   if (result == null) return result
   if (typeof result === "object") return result

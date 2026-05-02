@@ -10,7 +10,7 @@ import remarkMath from "remark-math"
 import rehypeKatex from "rehype-katex"
 
 import { type ChatAttachment, type ChatMessageDto } from "@/lib/chat-types"
-import { removeThinkBlocks } from "@/lib/chat-utils"
+import { normalizeMarkdownMathDelimiters, removeThinkBlocks } from "@/lib/chat-utils"
 import { MARKDOWN_COMPONENTS } from "./markdown-components"
 
 const EASE_OUT = [0.22, 1, 0.36, 1] as const
@@ -104,7 +104,11 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
     if (message.sender_role !== "assistant") {
       return null
     }
-    return removeThinkBlocks(message.content_text || "")
+    const thinkState = removeThinkBlocks(message.content_text || "")
+    return {
+      ...thinkState,
+      visibleMarkdown: normalizeMarkdownMathDelimiters(thinkState.visibleMarkdown),
+    }
   }, [message.content_text, message.sender_role])
 
   const messageTimestampText = useMemo(
@@ -196,7 +200,7 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
           {message.content_text ? (
             <div className="min-w-0 font-body [&_a]:font-medium [&_a]:text-blue-400 [&_a]:underline [&_code]:font-code [&_code]:text-[14px] [&_code]:break-words [&_code]:rounded [&_code]:bg-zinc-600 [&_code]:px-1 [&_hr]:my-6 [&_li]:break-words [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_p]:break-words [&_pre]:font-code [&_pre]:text-[14px] [&_pre]:my-3 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-zinc-800 [&_pre]:p-3 [&_table]:w-full [&_table]:min-w-[28rem] [&_table]:border-separate [&_table]:border-spacing-0 [&_table]:rounded-md [&_table]:border [&_table]:border-zinc-500/70 [&_thead]:bg-zinc-600/45 [&_th]:border-b [&_th]:border-zinc-500/70 [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:text-[13px] [&_th]:font-semibold [&_td]:border-b [&_td]:border-zinc-500/50 [&_td]:px-2 [&_td]:py-1.5 [&_td]:text-[13px] [&_tbody_tr:last-child_td]:border-b-0 [&_tbody_tr:nth-child(even)]:bg-zinc-600/25 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5">
               <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS} components={MARKDOWN_COMPONENTS}>
-                {message.content_text}
+                {normalizeMarkdownMathDelimiters(message.content_text)}
               </ReactMarkdown>
             </div>
           ) : null}
