@@ -1,6 +1,8 @@
 import unittest
 from unittest.mock import patch
+from uuid import UUID
 
+from app.schemas.rag import RetrievedChunk
 from app.schemas.requests import ChatStreamRequest, RunAgentRequest
 from app.services.run_agent_service import (
     run_agent_workflow,
@@ -11,6 +13,18 @@ from app.services.run_agent_service import (
 SAMPLE_RESULT = {
     "guideMarkdown": "## Assignment Overview\n\nWrite a concise draft.",
 }
+
+
+def _retrieved_chunk(index: int, source_type: str, text: str, similarity: float = 0.9):
+    return RetrievedChunk(
+        chunk_id=UUID(f"00000000-0000-0000-0000-{index:012d}"),
+        document_id=UUID(f"11111111-1111-1111-1111-{index:012d}"),
+        source_type=source_type,
+        source_id=f"source-{index}",
+        text=text,
+        metadata={},
+        similarity=similarity,
+    )
 
 
 class TestRunAgentService(unittest.TestCase):
@@ -156,7 +170,7 @@ class TestRunAgentService(unittest.TestCase):
             assignment_category="",
             guide_markdown="Guide body",
             chat_history=[],
-            retrieval_context=[],
+            retrieval_context_text="(none)",
             user_message="What should I do first?",
             include_thinking=False,
             calendar_context=None,
@@ -202,7 +216,7 @@ class TestRunAgentService(unittest.TestCase):
             assignment_category="",
             guide_markdown="Guide body",
             chat_history=[],
-            retrieval_context=[],
+            retrieval_context_text="(none)",
             user_message="Use thinking mode",
             include_thinking=True,
             calendar_context=None,
@@ -265,7 +279,7 @@ class TestRunAgentService(unittest.TestCase):
             assignment_category="",
             guide_markdown="Guide body",
             chat_history=[],
-            retrieval_context=[],
+            retrieval_context_text="(none)",
             user_message="Schedule time blocks for me",
             include_thinking=False,
             calendar_context={
@@ -328,7 +342,7 @@ class TestRunAgentService(unittest.TestCase):
             assignment_category="mathematics",
             guide_markdown="Guide body",
             chat_history=[],
-            retrieval_context=[],
+            retrieval_context_text="(none)",
             user_message="How should I start?",
             include_thinking=False,
             calendar_context=None,
@@ -403,6 +417,117 @@ class TestRunAgentService(unittest.TestCase):
             no_slots_review.calendar_context.availability_reason,  # type: ignore[union-attr]
             "no_slots_in_review_window",
         )
+
+    def test_stream_chat_workflow_semantic_mode_uses_semantic_context(self):
+        req = ChatStreamRequest(
+            assignment_payload={"title": "HW1"},
+            guide_markdown="Guide body",
+            chat_history=[],
+            retrieval_context=[
+                {
+                    "chunk_id": "legacy-1",
+                    "source": "guide_markdown",
+                    "text": "Legacy lexical context",
+                    "score": 0.4,
+                }
+            ],
+            user_id="aaaaaaaa-0000-0000-0000-000000000001",
+            assignment_uuid="bbbbbbbb-0000-0000-0000-000000000002",
+            retrieval_mode="semantic",
+            user_message="What does the rubric require?",
+        )
+        semantic = [_retrieved_chunk(1, "rubric", "Semantic rubric context")]
+
+        with patch(
+            "app.services.run_agent_service.retrieve_rag_chunks",
+            return_value=semantic,
+        ), patch(
+            "app.services.run_agent_service._stream_headstart_chat_answer",
+            return_value=iter([{"content_delta": "Use the rubric.", "reasoning_delta": ""}]),
+        ) as mock_stream:
+            events = list(stream_chat_workflow(req, route_path="/api/v1/chats/stream"))
+
+        context = mock_stream.call_args.kwargs["retrieval_context_text"]
+        self.assertIn("Semantic rubric context", context)
+        self.assertNotIn("Legacy lexical context", context)
+        completed = [event for event in events if event.get("event") == "chat.completed"][0]["data"]
+        self.assertEqual(completed["sources"][0]["source_type"], "rubric")
+        self.assertEqual(completed["sources"][0]["label"], "A")
+
+    def test_stream_chat_workflow_hybrid_mode_merges_and_deduplicates(self):
+        req = ChatStreamRequest(
+            assignment_payload={"title": "HW1"},
+            guide_markdown="Guide body",
+            chat_history=[],
+            retrieval_context=[
+                {
+                    "chunk_id": "legacy-1",
+                    "source": "guide_markdown",
+                    "text": "Semantic guide context",
+                    "score": 0.8,
+                },
+                {
+                    "chunk_id": "legacy-2",
+                    "source": "assignment_payload",
+                    "text": "Unique lexical payload context",
+                    "score": 0.6,
+                },
+            ],
+            user_id="aaaaaaaa-0000-0000-0000-000000000001",
+            assignment_uuid="bbbbbbbb-0000-0000-0000-000000000002",
+            retrieval_mode="hybrid",
+            user_message="What should I do?",
+        )
+        semantic = [_retrieved_chunk(1, "guide_markdown", "Semantic guide context")]
+
+        with patch(
+            "app.services.run_agent_service.retrieve_rag_chunks",
+            return_value=semantic,
+        ), patch(
+            "app.services.run_agent_service._stream_headstart_chat_answer",
+            return_value=iter([{"content_delta": "Start here.", "reasoning_delta": ""}]),
+        ) as mock_stream:
+            events = list(stream_chat_workflow(req, route_path="/api/v1/chats/stream"))
+
+        context = mock_stream.call_args.kwargs["retrieval_context_text"]
+        self.assertEqual(context.count("Semantic guide context"), 1)
+        self.assertIn("Unique lexical payload context", context)
+        completed = [event for event in events if event.get("event") == "chat.completed"][0]["data"]
+        self.assertEqual(len(completed["sources"]), 2)
+
+    def test_stream_chat_workflow_retrieval_exception_warns_and_uses_lexical(self):
+        req = ChatStreamRequest(
+            assignment_payload={"title": "HW1"},
+            guide_markdown="Guide body",
+            chat_history=[],
+            retrieval_context=[
+                {
+                    "chunk_id": "legacy-1",
+                    "source": "guide_markdown",
+                    "text": "Fallback lexical context",
+                    "score": 0.7,
+                }
+            ],
+            user_id="aaaaaaaa-0000-0000-0000-000000000001",
+            assignment_uuid="bbbbbbbb-0000-0000-0000-000000000002",
+            retrieval_mode="hybrid",
+            user_message="What should I do?",
+        )
+
+        with patch(
+            "app.services.run_agent_service.retrieve_rag_chunks",
+            side_effect=RuntimeError("index unavailable"),
+        ), patch(
+            "app.services.run_agent_service._stream_headstart_chat_answer",
+            return_value=iter([{"content_delta": "Use fallback.", "reasoning_delta": ""}]),
+        ) as mock_stream:
+            events = list(stream_chat_workflow(req, route_path="/api/v1/chats/stream"))
+
+        warning_events = [event for event in events if event.get("event") == "chat.retrieval_warning"]
+        self.assertEqual(len(warning_events), 1)
+        self.assertIn("index unavailable", warning_events[0]["data"]["message"])
+        context = mock_stream.call_args.kwargs["retrieval_context_text"]
+        self.assertIn("Fallback lexical context", context)
 
 
 if __name__ == "__main__":

@@ -21,10 +21,13 @@ Errors/Exceptions:
 
 import math
 import json
+import uuid
+from difflib import SequenceMatcher
 from typing import Generator
 
 from ..core.logging import get_logger
 from ..schemas.requests import ChatStreamRequest, RunAgentRequest
+from ..schemas.rag import RetrievedChunk
 from ..schemas.responses import ChatCompletionResponse, RunAgentResponse
 from ..schemas.shared import PdfExtraction, PdfExtractionQuality, PdfPageExtraction
 from .image_extraction_service import extract_images_deduped
@@ -36,6 +39,8 @@ from .pdf_extraction_service import (
     format_pdf_extractions_for_prompt,
 )
 from .pdf_text_service import format_attachment_block
+from .rag_context_formatter import format_retrieved_context
+from .rag_retrieval_service import retrieve as retrieve_rag_chunks
 
 logger = get_logger("headstart.main")
 
@@ -63,7 +68,7 @@ def _stream_headstart_chat_answer(
     assignment_category: str,
     guide_markdown: str,
     chat_history: list[dict],
-    retrieval_context: list[dict],
+    retrieval_context_text: str,
     user_message: str,
     include_thinking: bool = False,
     calendar_context: dict | None = None,
@@ -78,7 +83,7 @@ def _stream_headstart_chat_answer(
         assignment_category=assignment_category,
         guide_markdown=guide_markdown,
         chat_history=chat_history,
-        retrieval_context=retrieval_context,
+        retrieval_context_text=retrieval_context_text,
         user_message=user_message,
         include_thinking=include_thinking,
         calendar_context=calendar_context,
@@ -362,6 +367,73 @@ def _extract_user_pdf_files_deduped(pdf_files: list) -> list:
     return extract_pdf_extractions_from_pdf_files(unique_files, source="user_upload")
 
 
+def _stable_uuid(seed: str) -> uuid.UUID:
+    return uuid.uuid5(uuid.NAMESPACE_URL, seed)
+
+
+def _legacy_chunk_to_retrieved(item: object) -> RetrievedChunk | None:
+    source = getattr(item, "source", None)
+    text = str(getattr(item, "text", "") or "").strip()
+    if not source or not text:
+        return None
+
+    raw_chunk_id = str(getattr(item, "chunk_id", "") or "")
+    try:
+        chunk_id = uuid.UUID(raw_chunk_id)
+    except ValueError:
+        chunk_id = _stable_uuid(f"legacy-rag-chunk:{source}:{raw_chunk_id}:{text[:160]}")
+
+    score = float(getattr(item, "score", 0.0) or 0.0)
+    return RetrievedChunk(
+        chunk_id=chunk_id,
+        document_id=_stable_uuid(f"legacy-rag-document:{source}:{raw_chunk_id}"),
+        source_type=source,
+        source_id=f"legacy:{raw_chunk_id or chunk_id}",
+        text=text,
+        metadata={"retrieval": "lexical", "legacy_chunk_id": raw_chunk_id},
+        similarity=score,
+    )
+
+
+def _text_similarity(left: str, right: str) -> float:
+    left_norm = " ".join(left.lower().split())
+    right_norm = " ".join(right.lower().split())
+    if not left_norm or not right_norm:
+        return 0.0
+    if left_norm == right_norm:
+        return 1.0
+    if left_norm in right_norm or right_norm in left_norm:
+        shorter = min(len(left_norm), len(right_norm))
+        longer = max(len(left_norm), len(right_norm))
+        return shorter / longer
+    return SequenceMatcher(None, left_norm, right_norm).ratio()
+
+
+def _merge_retrieval_chunks(
+    semantic_chunks: list[RetrievedChunk],
+    lexical_chunks: list[RetrievedChunk],
+) -> list[RetrievedChunk]:
+    selected = list(semantic_chunks)
+    for lexical in lexical_chunks:
+        if any(_text_similarity(lexical.text, selected_chunk.text) >= 0.88 for selected_chunk in selected):
+            continue
+        selected.append(lexical)
+    return selected
+
+
+def _build_legacy_retrieval_chunks(req: ChatStreamRequest) -> list[RetrievedChunk]:
+    chunks: list[RetrievedChunk] = []
+    for item in req.retrieval_context or []:
+        chunk = _legacy_chunk_to_retrieved(item)
+        if chunk:
+            chunks.append(chunk)
+    return chunks
+
+
+def _serialize_sources(chunks: list[RetrievedChunk]) -> list[dict]:
+    return [chunk.model_dump(mode="json") for chunk in chunks]
+
+
 def stream_chat_workflow(req: ChatStreamRequest, route_path: str) -> Generator[dict, None, None]:
     """
     Execute follow-up chat workflow and emit typed stream events for SSE clients.
@@ -460,6 +532,50 @@ def stream_chat_workflow(req: ChatStreamRequest, route_path: str) -> Generator[d
             len(assignment_extractions),
         )
 
+        lexical_chunks = _build_legacy_retrieval_chunks(req)
+        semantic_chunks: list[RetrievedChunk] = []
+        retrieval_warning: str | None = None
+        should_retrieve = (
+            req.retrieval_mode != "lexical"
+            and req.user_id is not None
+            and req.assignment_uuid is not None
+        )
+
+        if should_retrieve:
+            try:
+                semantic_chunks = retrieve_rag_chunks(
+                    query=req.user_message,
+                    user_id=req.user_id,
+                    assignment_uuid=req.assignment_uuid,
+                    top_k=req.retrieval_top_k,
+                    source_types=req.source_types,
+                )
+                if not semantic_chunks:
+                    retrieval_warning = "Semantic retrieval returned no chunks; using lexical context."
+            except Exception as retrieval_exc:
+                logger.warning("Semantic RAG retrieval failed; using lexical context", exc_info=True)
+                retrieval_warning = str(retrieval_exc)
+
+        if retrieval_warning:
+            yield _build_event(
+                "chat.retrieval_warning",
+                {
+                    "stage": "chat_streaming",
+                    "progress_percent": 97,
+                    "status_message": "Semantic retrieval unavailable; using fallback context",
+                    "message": retrieval_warning,
+                },
+            )
+
+        if semantic_chunks and req.retrieval_mode == "semantic":
+            retrieval_chunks = semantic_chunks
+        elif semantic_chunks and req.retrieval_mode == "hybrid":
+            retrieval_chunks = _merge_retrieval_chunks(semantic_chunks, lexical_chunks)
+        else:
+            retrieval_chunks = lexical_chunks
+
+        formatted_retrieval = format_retrieved_context(retrieval_chunks)
+
         chunks: list[str] = []
         chunk_count = 0
         char_count = 0
@@ -471,7 +587,7 @@ def stream_chat_workflow(req: ChatStreamRequest, route_path: str) -> Generator[d
             assignment_category=req.assignment_category or "",
             guide_markdown=req.guide_markdown,
             chat_history=[item.model_dump() for item in req.chat_history],
-            retrieval_context=[item.model_dump() for item in req.retrieval_context],
+            retrieval_context_text=formatted_retrieval.text,
             user_message=req.user_message,
             include_thinking=req.thinking_mode,
             calendar_context=req.calendar_context.model_dump() if req.calendar_context else None,
@@ -526,6 +642,7 @@ def stream_chat_workflow(req: ChatStreamRequest, route_path: str) -> Generator[d
             "stage": "completed",
             "progress_percent": 100,
             "status_message": "Response ready",
+            "sources": _serialize_sources(formatted_retrieval.sources),
         }
         thinking_content = "".join(reasoning_chunks).strip()
         if thinking_content:

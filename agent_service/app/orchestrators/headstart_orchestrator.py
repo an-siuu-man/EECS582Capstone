@@ -708,6 +708,7 @@ calendar data is unavailable and suggest they open the Calendar Planner page.
 - In regenerated guides, prioritize student preferences and opinions over legacy guide phrasing.
 - Be concise and actionable; avoid padding or repeating context back to the student.
 - Use bullet lists, numbered steps, or short code snippets when they make an answer clearer.
+- When citing information from retrieved context, use the source label (for example [A] or [B]).
 - If relevant context is absent or ambiguous, explicitly say so.
 - End with a concrete next step whenever the student's question is task-oriented.\
 """
@@ -1039,6 +1040,7 @@ def stream_headstart_chat_answer(
     assignment_category: str = "",
     chat_history: Optional[list[dict]] = None,
     retrieval_context: Optional[list[dict]] = None,
+    retrieval_context_text: Optional[str] = None,
     user_message: str = "",
     include_thinking: bool = False,
     calendar_context: Optional[dict] = None,
@@ -1081,10 +1083,13 @@ def stream_headstart_chat_answer(
         _format_chat_history_for_prompt(chat_history),
         MAX_CHAT_HISTORY_CHARS,
     )
-    retrieval_context_str = _truncate_for_chat(
-        _format_retrieval_context_for_prompt(retrieval_context),
-        MAX_CHAT_RETRIEVAL_CHARS,
-    )
+    if retrieval_context_text is not None:
+        retrieval_context_str = _truncate_for_chat(retrieval_context_text, MAX_CHAT_RETRIEVAL_CHARS)
+    else:
+        retrieval_context_str = _truncate_for_chat(
+            _format_retrieval_context_for_prompt(retrieval_context),
+            MAX_CHAT_RETRIEVAL_CHARS,
+        )
     user_message_str = (user_message or "").strip()
     if not user_message_str:
         user_message_str = "Please summarize what I should do next."
@@ -1143,4 +1148,3 @@ def stream_headstart_chat_answer(
 
     if not yielded:
         raise RuntimeError("Model stream returned no follow-up response.")
-
