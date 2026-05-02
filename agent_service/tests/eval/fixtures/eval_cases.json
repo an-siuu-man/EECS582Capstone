@@ -1,0 +1,37 @@
+[
+  {
+    "id": "rubric_expectations",
+    "category": "rubric",
+    "query": "What does the grading rubric emphasize most for this assignment?",
+    "expected_source_type": "rubric",
+    "expected_keywords": ["rubric", "criteria", "points"]
+  },
+  {
+    "id": "planning_due_date",
+    "category": "assignment_payload",
+    "query": "When is this due and what should I plan first?",
+    "expected_source_type": "assignment_payload",
+    "expected_keywords": ["due", "date", "title"]
+  },
+  {
+    "id": "pdf_specific_requirement",
+    "category": "assignment_pdf",
+    "query": "What requirement appears in the assignment PDF instructions?",
+    "expected_source_type": "assignment_pdf",
+    "expected_keywords": ["submit", "report", "pdf"]
+  },
+  {
+    "id": "vague_next_step",
+    "category": "vague",
+    "query": "What should I focus on next?",
+    "expected_source_type": null,
+    "expected_keywords": []
+  },
+  {
+    "id": "guide_specific_milestones",
+    "category": "guide_markdown",
+    "query": "What milestones does the generated study guide recommend?",
+    "expected_source_type": "guide_markdown",
+    "expected_keywords": ["milestone", "study", "plan"]
+  }
+]
