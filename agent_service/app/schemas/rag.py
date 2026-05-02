@@ -50,3 +50,14 @@ class RagStatusResponse(BaseModel):
     chunk_count: int
     last_indexed_at: Optional[str]
     sources: Dict[str, int]
+
+
+class RetrievedChunk(BaseModel):
+    chunk_id: UUID
+    document_id: UUID
+    source_type: RagSourceType
+    source_id: str
+    text: str
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    similarity: float = 0.0
+    label: Optional[str] = None

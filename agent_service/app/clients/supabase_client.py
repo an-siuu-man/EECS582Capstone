@@ -31,6 +31,8 @@ def _post(path: str, body: Any, extra_headers: dict[str, str] | None = None) -> 
     headers = {**_headers(), **(extra_headers or {})}
     resp = httpx.post(f"{_base()}/{path}", headers=headers, json=body, timeout=_TIMEOUT)
     resp.raise_for_status()
+    if not resp.content:
+        return None
     return resp.json()
 
 
@@ -161,6 +163,41 @@ def get_rag_status(user_id: str, assignment_uuid: str) -> list[dict[str, Any]]:
             "select": "id,source_type,document_id,created_at",
         },
     )
+
+
+def match_rag_chunks(
+    query_embedding: list[float],
+    user_id: str,
+    assignment_uuid: str,
+    match_count: int = 12,
+    source_types: Optional[list[str]] = None,
+    session_id: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    """Call the match_rag_chunks RPC for scoped semantic retrieval.
+
+    Args:
+        query_embedding: Embedded query vector.
+        user_id: Owner user UUID used to scope retrieval.
+        assignment_uuid: Assignment UUID used to scope retrieval.
+        match_count: Maximum number of rows to return.
+        source_types: Optional source type filter.
+        session_id: Optional upload-session filter.
+
+    Returns:
+        List of matched chunk rows from PostgREST.
+    """
+    rows = _post(
+        "rpc/match_rag_chunks",
+        {
+            "query_embedding": query_embedding,
+            "match_user_id": user_id,
+            "match_assignment_uuid": assignment_uuid,
+            "match_count": match_count,
+            "source_types": source_types,
+            "match_session_id": session_id,
+        },
+    )
+    return rows if isinstance(rows, list) else []
 
 
 # ---------------------------------------------------------------------------

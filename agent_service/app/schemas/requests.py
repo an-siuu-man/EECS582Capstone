@@ -20,9 +20,11 @@ Errors/Exceptions:
 """
 
 from typing import Any, Dict, List, Literal, Optional
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from .rag import RagSourceType
 from .shared import ImageFile, PdfExtraction, PdfFile
 
 
@@ -42,7 +44,7 @@ class ChatHistoryMessage(BaseModel):
 
 class RetrievalChunk(BaseModel):
     chunk_id: str
-    source: Literal["guide_markdown", "assignment_payload", "assignment_pdf"]
+    source: RagSourceType
     text: str
     score: float = 0.0
 
@@ -98,6 +100,11 @@ class ChatStreamRequest(BaseModel):
     guide_markdown: str = ""
     chat_history: List[ChatHistoryMessage] = Field(default_factory=list)
     retrieval_context: List[RetrievalChunk] = Field(default_factory=list)
+    user_id: Optional[UUID] = None
+    assignment_uuid: Optional[UUID] = None
+    retrieval_mode: Literal["semantic", "hybrid", "lexical"] = "hybrid"
+    retrieval_top_k: int = 12
+    source_types: Optional[List[RagSourceType]] = None
     user_message: str
     thinking_mode: bool = False
     calendar_context: Optional[CalendarContext] = None
