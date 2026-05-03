@@ -18,6 +18,7 @@ import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { SidebarContent } from "@/components/layout/sidebar"
 import { ModeToggle } from "@/components/mode-toggle"
+import { CommandPalette } from "@/components/ui/command-palette"
 import { useAuthUser } from "@/hooks/use-auth-user"
 
 export function Header() {
@@ -76,6 +77,7 @@ export function Header() {
       </div>
 
       <div className="flex items-center gap-1.5 md:gap-2">
+        <CommandPalette />
         <ModeToggle />
 
         <DropdownMenu>

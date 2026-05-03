@@ -117,17 +117,17 @@ export function SidebarContent({
         </nav>
       </div>
 
-      <div className={cn("border-t", collapsed ? "p-3" : "p-4")}>
+      <div className={cn("border-t pt-2", collapsed ? "p-3" : "px-3 pb-4")}>
          <Button
             variant="ghost"
             className={cn(
-              "w-full text-muted-foreground hover:text-destructive transition-all duration-300",
+              "w-full text-destructive/70 hover:bg-destructive/8 hover:text-destructive transition-all duration-300",
               collapsed ? "justify-start px-3" : "justify-start gap-2"
             )}
             onClick={onSignOut}
             disabled={isSigningOut}
          >
-            <LogOut className="h-4 w-4" />
+            <LogOut className="h-4 w-4 shrink-0" />
             <span
               className={cn(
                 "overflow-hidden whitespace-nowrap transition-[max-width,opacity,transform] duration-300 ease-out",

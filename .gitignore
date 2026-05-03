@@ -45,3 +45,5 @@ AGENTS.md
 .claude/
 
 supabase/
+
+.playwright-mcp/

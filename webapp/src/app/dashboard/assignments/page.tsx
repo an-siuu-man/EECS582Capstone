@@ -651,6 +651,7 @@ function AssignmentList({
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {assignments.map((assignment) => {
           const dueAt = parseIsoDate(assignment.due_at_iso)
+          const isPastDue = !assignment.is_submitted && dueAt != null && dueAt.getTime() < Date.now()
           const isUpdating = updatingAssignmentId === assignment.assignment_id
           const isDeleting = deletingAssignmentId === assignment.assignment_id
           const submitTooltip = assignment.is_submitted
@@ -668,10 +669,17 @@ function AssignmentList({
             >
               <Card
                 className={cn(
-                  "flex h-full overflow-hidden border-l-4 transition-shadow hover:shadow-md",
+                  "relative flex h-full overflow-hidden border-l-4 transition-shadow hover:shadow-md",
                   priorityRailTone(assignment.priority),
                 )}
               >
+                {isPastDue && (
+                  <motion.div
+                    className="pointer-events-none absolute inset-y-0 left-0 w-1 bg-red-500"
+                    animate={{ opacity: [1, 0.15, 1] }}
+                    transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
+                  />
+                )}
                 <CardHeader className="space-y-3 pb-3">
                   <div className="flex items-start justify-between gap-3">
                     <Tooltip>
@@ -749,21 +757,18 @@ function AssignmentList({
                     <Badge variant="outline" className={cn(priorityTone(assignment.priority))}>
                       {assignment.priority}
                     </Badge>
-                    <Badge variant="outline" className={cn(statusTone(assignment.status))}>
-                      {assignment.status}
-                    </Badge>
                   </div>
 
                   <div className="flex items-center justify-between gap-2 border-t border-border/70 pt-3">
                     {assignment.assignment_id ? (
                       <Button asChild variant="outline" size="sm">
                         <Link href={`/dashboard/assignments/${encodeURIComponent(assignment.assignment_id)}`}>
-                          Open
+                          {assignment.status === "Completed" ? "View Guide" : assignment.status === "In Progress" ? "Open Chat" : "Start Chat"}
                         </Link>
                       </Button>
                     ) : (
                       <Button variant="outline" size="sm" disabled>
-                        Open
+                        Start Chat
                       </Button>
                     )}
 

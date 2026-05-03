@@ -123,10 +123,13 @@ function parseEpochDate(value: number) {
   return date
 }
 
+type StatFilter = "all" | "not-submitted" | "submitted" | "upcoming" | "overdue"
+
 export default function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [timeGreeting, setTimeGreeting] = useState(greeting())
+  const [statFilter, setStatFilter] = useState<StatFilter>("all")
   const { user: authUser } = useAuthUser()
 
   useEffect(() => {
@@ -197,6 +200,21 @@ export default function Dashboard() {
   }
 
   const dashboardData = data ?? { upcomingAssignments: [], generatedGuides: [] }
+
+  function toggleStatFilter(next: StatFilter) {
+    setStatFilter((current) => (current === next ? "all" : next))
+  }
+
+  const filteredAssignments = dashboardData.upcomingAssignments.filter((assignment) => {
+    if (statFilter === "all") return true
+    if (statFilter === "submitted") return assignment.is_submitted
+    if (statFilter === "not-submitted") return !assignment.is_submitted
+    const dueAt = parseIsoDate(assignment.due_at_iso)
+    if (statFilter === "overdue") return !assignment.is_submitted && dueAt != null && dueAt.getTime() < Date.now()
+    if (statFilter === "upcoming") return !assignment.is_submitted && (dueAt == null || dueAt.getTime() >= Date.now())
+    return true
+  })
+
   const readyGuides = dashboardData.generatedGuides.filter(
     (guide) => guide.status === "Ready",
   ).length
@@ -238,7 +256,7 @@ export default function Dashboard() {
                   variant="outline"
                   className="border-border/60 bg-background/80 px-2 py-0.5 text-[11px] shadow-sm"
                 >
-                  Ready {readyGuides}
+                  {readyGuides === 0 ? "No guides ready" : readyGuides === 1 ? "1 guide ready" : `${readyGuides} guides ready`}
                 </Badge>
                 {loadError ? (
                   <Badge
@@ -252,53 +270,33 @@ export default function Dashboard() {
             </div>
 
             <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
-              <div className={cn("rounded-xl border px-3 py-2.5 backdrop-blur-sm", dashboardStatTone("amber"))}>
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide opacity-90">
-                    Not Submitted
-                  </p>
-                  <ClipboardList className="h-3.5 w-3.5 opacity-85" />
-                </div>
-                <p className="mt-1.5 text-2xl font-semibold leading-none">{notSubmittedCount}</p>
-                <p className="mt-1 text-[11px] opacity-85">Needs attention</p>
-              </div>
-              <div className={cn("rounded-xl border px-3 py-2.5 backdrop-blur-sm", dashboardStatTone("emerald"))}>
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide opacity-90">
-                    Submitted
-                  </p>
-                  <CheckCircle2 className="h-3.5 w-3.5 opacity-85" />
-                </div>
-                <p className="mt-1.5 text-2xl font-semibold leading-none">{submittedCount}</p>
-                <p className="mt-1 text-[11px] opacity-85">Already completed</p>
-              </div>
-              <div className={cn("rounded-xl border px-3 py-2.5 backdrop-blur-sm", dashboardStatTone("sky"))}>
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide opacity-90">
-                    Upcoming
-                  </p>
-                  <CalendarDays className="h-3.5 w-3.5 opacity-85" />
-                </div>
-                <p className="mt-1.5 text-2xl font-semibold leading-none">{upcomingCount}</p>
-                <p className="mt-1 text-[11px] opacity-85">Not overdue yet</p>
-              </div>
-              <div
-                className={cn(
-                  "rounded-xl border px-3 py-2.5 backdrop-blur-sm",
-                  dashboardStatTone(overdueCount === 0 ? "emerald" : "red"),
-                )}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide opacity-90">
-                    Overdue
-                  </p>
-                  <AlertTriangle className="h-3.5 w-3.5 opacity-85" />
-                </div>
-                <p className="mt-1.5 text-2xl font-semibold leading-none">{overdueCount}</p>
-                <p className="mt-1 text-[11px] opacity-85">
-                  {overdueCount === 0 ? "All clear" : "Action needed"}
-                </p>
-              </div>
+              {([
+                { key: "not-submitted" as StatFilter, tone: "amber" as const, label: "Not Submitted", count: notSubmittedCount, sub: "Needs attention", icon: ClipboardList },
+                { key: "submitted" as StatFilter, tone: "emerald" as const, label: "Submitted", count: submittedCount, sub: "Already completed", icon: CheckCircle2 },
+                { key: "upcoming" as StatFilter, tone: "sky" as const, label: "Upcoming", count: upcomingCount, sub: "Not overdue yet", icon: CalendarDays },
+                { key: "overdue" as StatFilter, tone: (overdueCount === 0 ? "emerald" as const : "red" as const), label: "Overdue", count: overdueCount, sub: overdueCount === 0 ? "All clear" : "Action needed", icon: AlertTriangle },
+              ]).map(({ key, tone, label, count, sub, icon: Icon }) => {
+                const isActive = statFilter === key
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => toggleStatFilter(key)}
+                    className={cn(
+                      "rounded-xl border px-3 py-2.5 backdrop-blur-sm text-left transition-all duration-150",
+                      dashboardStatTone(tone),
+                      isActive ? "ring-2 ring-current ring-offset-1 ring-offset-background" : "hover:opacity-90 hover:-translate-y-0.5",
+                    )}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide opacity-90">{label}</p>
+                      <Icon className="h-3.5 w-3.5 opacity-85" />
+                    </div>
+                    <p className="mt-1.5 text-2xl font-semibold leading-none">{count}</p>
+                    <p className="mt-1 text-[11px] opacity-85">{isActive ? "Click to clear" : sub}</p>
+                  </button>
+                )
+              })}
             </div>
           </CardContent>
         </Card>
@@ -328,9 +326,13 @@ export default function Dashboard() {
               <div className="rounded-xl border border-dashed border-border/80 p-6 text-center text-sm text-muted-foreground">
                 No assignment context available yet.
               </div>
+            ) : filteredAssignments.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border/80 p-6 text-center text-sm text-muted-foreground">
+                No assignments match this filter.
+              </div>
             ) : (
               <div className={dashboardListScrollClass}>
-                {dashboardData.upcomingAssignments.map((assignment) => {
+                {filteredAssignments.map((assignment) => {
                     const dueAt = parseIsoDate(assignment.due_at_iso)
                     const isOverdue =
                       !assignment.is_submitted && dueAt ? dueAt.getTime() < Date.now() : false

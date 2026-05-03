@@ -367,6 +367,7 @@ export type UserChatSessionListItem = {
   title: string;
   assignmentCategory: string | null;
   lastUserMessage: string | null;
+  lastAssistantPreview: string | null;
   status: ChatSessionStatus;
   createdAt: number;
   updatedAt: number;
@@ -1271,7 +1272,7 @@ export async function listPersistedChatSessionsForUser(
   }
 
   const sessionIds = sessions.map((session) => session.id);
-  const [userMessages, latestMessageRows] =
+  const [userMessages, assistantMessages, latestMessageRows] =
     sessionIds.length > 0
       ? await Promise.all([
           selectMany<DbChatMessageListPreview>({
@@ -1279,6 +1280,15 @@ export async function listPersistedChatSessionsForUser(
             query: {
               session_id: inList(sessionIds),
               sender_role: eq("user"),
+              select: "session_id,message_index,content_text",
+              order: "session_id.asc,message_index.desc",
+            },
+          }),
+          selectMany<DbChatMessageListPreview>({
+            table: "chat_messages",
+            query: {
+              session_id: inList(sessionIds),
+              sender_role: eq("assistant"),
               select: "session_id,message_index,content_text",
               order: "session_id.asc,message_index.desc",
             },
@@ -1292,7 +1302,7 @@ export async function listPersistedChatSessionsForUser(
             },
           }),
         ])
-      : [[], []];
+      : [[], [], []];
 
   const latestMessageCreatedAtBySessionId = new Map<string, string>();
   for (const message of latestMessageRows) {
@@ -1308,6 +1318,17 @@ export async function listPersistedChatSessionsForUser(
       continue;
     }
     lastUserMessageBySessionId.set(
+      message.session_id,
+      toOptionalString(message.content_text),
+    );
+  }
+
+  const lastAssistantPreviewBySessionId = new Map<string, string | null>();
+  for (const message of assistantMessages) {
+    if (lastAssistantPreviewBySessionId.has(message.session_id)) {
+      continue;
+    }
+    lastAssistantPreviewBySessionId.set(
       message.session_id,
       toOptionalString(message.content_text),
     );
@@ -1374,6 +1395,7 @@ export async function listPersistedChatSessionsForUser(
         title: toOptionalString(session.title) ?? assignmentTitle,
         assignmentCategory: normalizeAssignmentCategory(session.assignment_category),
         lastUserMessage: lastUserMessageBySessionId.get(session.id) ?? null,
+        lastAssistantPreview: lastAssistantPreviewBySessionId.get(session.id) ?? null,
         status: session.status,
         createdAt,
         updatedAt,

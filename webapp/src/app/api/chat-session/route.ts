@@ -30,6 +30,7 @@ export async function GET(req: Request) {
         title: session.title,
         assignment_category: session.assignmentCategory,
         last_user_message: session.lastUserMessage,
+        last_assistant_preview: session.lastAssistantPreview,
         status: session.status,
         created_at: session.createdAt,
         updated_at: session.updatedAt,

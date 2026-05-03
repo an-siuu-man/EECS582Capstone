@@ -28,6 +28,7 @@ type ChatSessionListItemResponse = {
   title: string
   assignment_category?: string | null
   last_user_message?: string | null
+  last_assistant_preview?: string | null
   status: ChatSessionStatus
   created_at: number
   updated_at: number
@@ -489,6 +490,11 @@ export function ChatSessionList() {
                                           {item.status}
                                         </Badge>
                                       </div>
+                                      {item.last_assistant_preview ? (
+                                        <p className="mt-1.5 line-clamp-1 text-xs text-muted-foreground/80 italic">
+                                          {item.last_assistant_preview.replace(/[#*`_~[\]]/g, "").trim().slice(0, 140)}
+                                        </p>
+                                      ) : null}
                                       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                                         <span>Updated {updatedAtText}</span>
                                         <span>Attachments: {item.context.attachment_count}</span>
